@@ -29,14 +29,11 @@ export const VideoSessionPage: React.FC = () => {
     setError(null)
 
     try {
-      // Get window size (or use a reasonable default)
+      // Calculate optimal resolution based on viewport
       const width = Math.min(window.innerWidth - 100, 1920)
       const height = Math.min(window.innerHeight - 200, 1080)
       const finalWidth = Math.max(640, width)
       const finalHeight = Math.max(480, height)
-      
-      console.log(`Window size: ${window.innerWidth}x${window.innerHeight}`)
-      console.log(`Requesting resolution: ${finalWidth}x${finalHeight}`)
       
       const response = await webrtcService.createSession({
         width: finalWidth,

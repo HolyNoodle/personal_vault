@@ -28,13 +28,9 @@ async fn create_session(
     Json(payload): Json<Value>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     // For POC: Use mock user ID
-    tracing::info!("Received session creation request: {:?}", payload);
-    let config_result = serde_json::from_value(payload["config"].clone());
-    tracing::info!("Parsed config: {:?}", config_result);
-    
     let command = CreateSessionCommand {
         user_id: "poc-user-123".to_string(),
-        config: config_result.unwrap_or_default(),
+        config: serde_json::from_value(payload["config"].clone()).unwrap_or_default(),
     };
 
     match state.create_session_handler.handle(command, Arc::clone(&state.webrtc_adapter)).await {

@@ -104,7 +104,7 @@ impl Default for VideoConfig {
             width: 1920,
             height: 1080,
             framerate: 30,
-            codec: VideoCodec::H264,
+            codec: VideoCodec::VP8,
         }
     }
 }
