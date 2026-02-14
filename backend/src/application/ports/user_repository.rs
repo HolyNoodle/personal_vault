@@ -9,4 +9,5 @@ pub trait UserRepository: Send + Sync {
     async fn find_by_id(&self, id: &UserId) -> Result<Option<User>, String>;
     async fn save(&self, user: &User) -> Result<(), String>;
     async fn count_super_admins(&self) -> Result<i64, String>;
+    async fn count_users(&self) -> Result<i64, String>;
 }

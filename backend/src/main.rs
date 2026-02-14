@@ -6,6 +6,8 @@ use axum::{
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::cors::{CorsLayer, Any};
+use url::Url;
+use webauthn_rs::Webauthn;
 
 mod domain;
 mod application;
@@ -13,18 +15,71 @@ mod infrastructure;
 
 use infrastructure::driving::{WebRTCAdapter};
 use infrastructure::driven::{XvfbManager, FfmpegManager, InMemoryVideoSessionRepository};
-use infrastructure::driving::http::video_api::{ApiState, create_poc_router};
+use infrastructure::driven::persistence::{PostgresUserRepository, PostgresCredentialRepository, RedisChallengeRepository};
+use infrastructure::driving::http::video_api::{ApiState, create_video_api_router};
+use infrastructure::driving::http::auth;
+use infrastructure::AppState;
 use application::client::commands::{CreateSessionHandler, TerminateSessionHandler};
+use application::ports::{UserRepository, CredentialRepository, ChallengeRepository};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
     
-    println!("🚀 WebRTC POC Server starting...");
+    println!("🚀 Sandbox Server starting...");
     
     // Check prerequisites
     println!("Checking prerequisites...");
     check_prerequisites()?;
+    
+    // Initialize WebAuthn
+    let rp_id = std::env::var("WEBAUTHN_RP_ID").unwrap_or_else(|_| "localhost".to_string());
+    let rp_origin = std::env::var("WEBAUTHN_ORIGIN").unwrap_or_else(|_| "http://localhost:5173".to_string());
+    let webauthn = Arc::new(
+        webauthn_rs::WebauthnBuilder::new(&rp_id, &url::Url::parse(&rp_origin).unwrap())
+            .unwrap()
+            .rp_name("Secure Sandbox")
+            .build()
+            .unwrap()
+    );
+    
+    // Initialize database connection pool
+    let database_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgresql://sandbox_user:sandbox_dev_password@postgres:5432/sandbox_dev".to_string());
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&database_url)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to connect to database: {}", e))?;
+    
+    // Run migrations
+    println!("Running database migrations...");
+    sqlx::migrate!("./migrations")
+        .run(&pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to run migrations: {}", e))?;
+    println!("✅ Database migrations completed");
+    
+    // Initialize auth repositories
+    let user_repo = Arc::new(PostgresUserRepository::new(pool.clone())) as Arc<dyn UserRepository>;
+    let credential_repo = Arc::new(PostgresCredentialRepository::new(pool)) as Arc<dyn CredentialRepository>;
+    
+    // Initialize Redis challenge repository
+    let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
+    let redis_client = redis::Client::open(redis_url)
+        .map_err(|e| anyhow::anyhow!("Failed to create Redis client: {}", e))?;
+    let challenge_repo = Arc::new(RedisChallengeRepository::new(redis_client)) as Arc<dyn ChallengeRepository>;
+    
+    let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev_secret_key_change_in_production".to_string());
+    
+    // Create auth app state
+    let app_state = AppState {
+        webauthn,
+        jwt_secret,
+        user_repo,
+        credential_repo,
+        challenge_repo,
+    };
     
     // Initialize infrastructure adapters (hexagonal architecture - driven adapters)
     let session_repo = Arc::new(InMemoryVideoSessionRepository::new());
@@ -56,10 +111,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Build router (hexagonal architecture - driving adapters)
     let webrtc_clone = Arc::clone(&webrtc_adapter);
-    let app = Router::new()
+    
+    // Auth routes with AppState
+    let auth_routes = auth::setup_routes()
+        .with_state(app_state);
+    
+    // WebSocket route with WebRTCAdapter state
+    let ws_routes = Router::new()
         .route("/ws", get(infrastructure::driving::webrtc::ws_handler))
-        .with_state(webrtc_clone)
-        .merge(create_poc_router(api_state))
+        .with_state(webrtc_clone);
+    
+    // Merge all routes
+    let app = Router::new()
+        .merge(auth_routes)
+        .merge(ws_routes)
+        .merge(create_video_api_router(api_state))
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)
@@ -70,11 +136,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start server
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
     println!("✅ Server listening on http://{}", addr);
-    println!("\n📋 POC Endpoints:");
+    println!("\n📋 Available Endpoints:");
     println!("   - POST http://localhost:8080/api/sessions - Create video session");
     println!("   - WS   ws://localhost:8080/ws - WebRTC signaling");
     println!("   - GET  http://localhost:8080/health - Health check");
-    println!("\n⚠️  This is a POC build - authentication disabled for testing\n");
+    println!();
     
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
@@ -99,7 +165,7 @@ fn check_prerequisites() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("✅ FFmpeg found");
     
-    // Check xterm (optional, for demo app)
+    // Check for xterm (common terminal application)
     if !Command::new("xterm").arg("-version").output().is_ok() {
         println!("⚠️  xterm not found (optional). Install with: sudo apt-get install xterm");
     } else {

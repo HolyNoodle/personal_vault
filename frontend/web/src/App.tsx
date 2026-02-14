@@ -24,7 +24,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function App() {
-  const [isInitialized, setIsInitialized] = useState<boolean | null>(null);
+  const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -35,7 +35,7 @@ function App() {
     try {
       const response = await fetch('http://localhost:8080/api/setup/status');
       const data = await response.json();
-      setIsInitialized(data.initialized);
+      setNeedsSetup(data.needs_setup);
     } catch (error) {
       console.error('Failed to check setup status:', error);
     } finally {
@@ -54,11 +54,11 @@ function App() {
     );
   }
 
-  if (isInitialized === false) {
+  if (needsSetup === true) {
     return (
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        <SetupPage onSetupComplete={() => setIsInitialized(true)} />
+        <SetupPage onSetupComplete={() => setNeedsSetup(false)} />
       </ThemeProvider>
     );
   }
@@ -71,8 +71,8 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/files" element={<ProtectedRoute><FilesPage /></ProtectedRoute>} />
           <Route path="/sessions" element={<ProtectedRoute><SessionsPage /></ProtectedRoute>} />
-          <Route path="/video-poc" element={<Layout><VideoSessionPage /></Layout>} />
-          <Route path="/" element={<Navigate to="/video-poc" replace />} />
+          <Route path="/video" element={<ProtectedRoute><VideoSessionPage /></ProtectedRoute>} />
+          <Route path="/" element={<Navigate to="/login" replace />} />
         </Routes>
       </BrowserRouter>
     </ThemeProvider>

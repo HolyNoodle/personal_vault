@@ -14,6 +14,7 @@ import VideoCallIcon from '@mui/icons-material/VideoCall'
 import StopCircleIcon from '@mui/icons-material/StopCircle'
 import { VideoPlayer } from '../components/VideoPlayer'
 import { WebRTCService } from '../services/webrtc'
+import { useAuthStore } from '../store/authStore'
 
 export const VideoSessionPage: React.FC = () => {
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -21,10 +22,16 @@ export const VideoSessionPage: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [connectionState, setConnectionState] = useState<string>('disconnected')
+  const { user } = useAuthStore()
 
   const webrtcService = new WebRTCService()
 
   const handleStartSession = async () => {
+    if (!user?.id) {
+      setError('User not authenticated')
+      return
+    }
+
     setLoading(true)
     setError(null)
 
@@ -36,9 +43,11 @@ export const VideoSessionPage: React.FC = () => {
       const finalHeight = Math.max(480, height)
       
       const response = await webrtcService.createSession({
+        user_id: user.id,
         width: finalWidth,
         height: finalHeight,
-        framerate: 30
+        framerate: 30,
+        application: 'xterm',
       })
 
       console.log('Session created:', response)
@@ -73,10 +82,10 @@ export const VideoSessionPage: React.FC = () => {
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       <Paper sx={{ p: 3 }}>
         <Typography variant="h4" gutterBottom>
-          WebRTC Video Session POC
+          Video Session
         </Typography>
         <Typography variant="body2" color="text.secondary" paragraph>
-          Test the WebRTC video streaming functionality
+          Stream applications in an isolated sandbox environment
         </Typography>
 
         {error && (

@@ -116,4 +116,15 @@ impl UserRepository for PostgresUserRepository {
         
         Ok(count)
     }
+    
+    async fn count_users(&self) -> Result<i64, String> {
+        let (count,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM users"
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| format!("Database error: {}", e))?;
+        
+        Ok(count)
+    }
 }

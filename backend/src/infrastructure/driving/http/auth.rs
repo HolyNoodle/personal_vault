@@ -1,5 +1,5 @@
 use axum::{
-    routing::post,
+    routing::{post, get},
     Router,
     response::Json,
     extract::State,
@@ -61,8 +61,14 @@ pub struct UserInfo {
     pub role: String,
 }
 
+#[derive(Serialize)]
+pub struct SetupStatusResponse {
+    pub needs_setup: bool,
+}
+
 pub fn setup_routes() -> Router<AppState> {
     Router::new()
+        .route("/api/setup/status", get(check_setup_status))
         .route("/api/setup/initiate-registration", post(initiate_registration))
         .route("/api/setup/complete-registration", post(complete_registration))
         .route("/api/auth/initiate-login", post(initiate_login))
@@ -131,5 +137,18 @@ async fn complete_login(
             display_name: result.display_name,
             role: result.role,
         },
+    }))
+}
+async fn check_setup_status(
+    State(state): State<AppState>,
+) -> Result<Json<SetupStatusResponse>, (StatusCode, String)> {
+    use crate::application::ports::UserRepository;
+    
+    // Check if any users exist in the database
+    let has_users = state.user_repo.count_users().await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    
+    Ok(Json(SetupStatusResponse {
+        needs_setup: has_users == 0,
     }))
 }

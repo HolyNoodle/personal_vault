@@ -12,6 +12,12 @@ pub struct CreateSessionCommand {
     pub user_id: String,
     #[serde(default)]
     pub config: VideoConfig,
+    #[serde(default = "default_application")]
+    pub application: String,
+}
+
+fn default_application() -> String {
+    "xterm".to_string()
 }
 
 #[derive(Debug, Serialize)]
@@ -55,8 +61,8 @@ impl CreateSessionHandler {
             command.config.height,
         ).await?;
 
-        // Launch demo application (for POC: xterm)
-        self.sandbox.launch_application(&session.id, &display, "xterm", command.config.width, command.config.height).await?;
+        // Launch configured application in the virtual display
+        self.sandbox.launch_application(&session.id, &display, &command.application, command.config.width, command.config.height).await?;
 
         // Start video streaming and get FFmpeg stdout
         let ffmpeg_stdout = self.streaming.start_session(

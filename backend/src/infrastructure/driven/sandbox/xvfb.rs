@@ -84,8 +84,8 @@ impl XvfbManager {
     async fn launch_app(&self, session_id: &str, display_str: &str, command: &str, width: u16, height: u16) -> Result<()> {
         debug!("Launching {} on display {} for session {} ({}x{})", command, display_str, session_id, width, height);
 
-        // Calculate xterm geometry (columns x rows based on pixel dimensions)
-        // Typical xterm: 1 character ≈ 9 pixels wide, 16 pixels tall
+        // Calculate terminal geometry (columns x rows based on pixel dimensions)
+        // Standard terminal font: ~9 pixels wide, ~16 pixels tall
         let cols = width / 9;
         let rows = height / 16;
         let geometry = format!("{}x{}+0+0", cols, rows);

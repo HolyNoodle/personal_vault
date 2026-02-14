@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::domain::aggregates::{VideoSession, VideoSessionId};
 use crate::application::ports::VideoSessionRepository;
 
-/// In-memory implementation of VideoSessionRepository (for POC)
+/// In-memory implementation of VideoSessionRepository
 /// In production, this would use PostgreSQL
 pub struct InMemoryVideoSessionRepository {
     sessions: Arc<RwLock<HashMap<String, VideoSession>>>,

@@ -1,8 +1,10 @@
 // WebRTC service for handling video sessions
 export interface SessionConfig {
+  user_id: string
   width?: number
   height?: number
   framerate?: number
+  application?: string
 }
 
 export interface CreateSessionResponse {
@@ -17,13 +19,21 @@ export class WebRTCService {
     this.baseUrl = baseUrl
   }
 
-  async createSession(config?: SessionConfig): Promise<CreateSessionResponse> {
+  async createSession(config: SessionConfig): Promise<CreateSessionResponse> {
     const response = await fetch(`${this.baseUrl}/api/sessions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ config: config || {} }),
+      body: JSON.stringify({
+        user_id: config.user_id,
+        config: {
+          width: config.width,
+          height: config.height,
+          framerate: config.framerate,
+        },
+        application: config.application,
+      }),
     })
 
     if (!response.ok) {

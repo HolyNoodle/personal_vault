@@ -27,10 +27,23 @@ async fn create_session(
     State(state): State<Arc<ApiState>>,
     Json(payload): Json<Value>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    // For POC: Use mock user ID
+    // TODO: Extract user_id from authenticated JWT token
+    // For now, require user_id in payload until auth middleware is integrated
+    let user_id = payload["user_id"]
+        .as_str()
+        .ok_or_else(|| (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": "user_id required" }))
+        ))?
+        .to_string();
+
     let command = CreateSessionCommand {
-        user_id: "poc-user-123".to_string(),
+        user_id,
         config: serde_json::from_value(payload["config"].clone()).unwrap_or_default(),
+        application: payload["application"]
+            .as_str()
+            .map(String::from)
+            .unwrap_or_else(|| "xterm".to_string()),
     };
 
     match state.create_session_handler.handle(command, Arc::clone(&state.webrtc_adapter)).await {
@@ -63,7 +76,7 @@ async fn health_check() -> Json<Value> {
     Json(json!({ "status": "ok" }))
 }
 
-pub fn create_poc_router(api_state: Arc<ApiState>) -> Router {
+pub fn create_video_api_router(api_state: Arc<ApiState>) -> Router {
     Router::new()
         .route("/health", get(health_check))
         .nest("/api", create_video_routes(api_state))
