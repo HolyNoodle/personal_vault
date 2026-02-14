@@ -1,0 +1,422 @@
+use anyhow::{Context, Result};
+use base64::Engine;
+use eframe::egui;
+use shared::PlatformMessage;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::UnixStream;
+use tokio::sync::mpsc;
+use tracing::{error, info};
+
+const SOCKET_PATH: &str = "/tmp/sandbox-ipc.sock";
+
+#[derive(Default)]
+struct FileItem {
+    name: String,
+    path: PathBuf,
+    is_dir: bool,
+    size: u64,
+}
+
+struct FileExplorerApp {
+    current_path: PathBuf,
+    items: Vec<FileItem>,
+    selected_index: Option<usize>,
+    error_message: Option<String>,
+    tx: mpsc::UnboundedSender<PlatformMessage>,
+    rx: Arc<Mutex<mpsc::UnboundedReceiver<PlatformMessage>>>,
+}
+
+impl FileExplorerApp {
+    fn new(
+        tx: mpsc::UnboundedSender<PlatformMessage>,
+        rx: Arc<Mutex<mpsc::UnboundedReceiver<PlatformMessage>>>,
+    ) -> Self {
+        let mut app = Self {
+            current_path: PathBuf::from("/home"),
+            items: Vec::new(),
+            selected_index: None,
+            error_message: None,
+            tx,
+            rx,
+        };
+        app.refresh_directory();
+        app
+    }
+
+    fn refresh_directory(&mut self) {
+        self.items.clear();
+        self.selected_index = None;
+
+        match std::fs::read_dir(&self.current_path) {
+            Ok(entries) => {
+                for entry in entries.flatten() {
+                    if let Ok(metadata) = entry.metadata() {
+                        self.items.push(FileItem {
+                            name: entry.file_name().to_string_lossy().to_string(),
+                            path: entry.path(),
+                            is_dir: metadata.is_dir(),
+                            size: metadata.len(),
+                        });
+                    }
+                }
+                self.items.sort_by(|a, b| {
+                    match (a.is_dir, b.is_dir) {
+                        (true, false) => std::cmp::Ordering::Less,
+                        (false, true) => std::cmp::Ordering::Greater,
+                        _ => a.name.cmp(&b.name),
+                    }
+                });
+            }
+            Err(e) => {
+                self.error_message = Some(format!("Failed to read directory: {}", e));
+            }
+        }
+
+        // Send state to platform
+        let selected_path = self
+            .selected_index
+            .and_then(|idx| self.items.get(idx))
+            .map(|item| item.path.to_string_lossy().to_string());
+
+        let actions = self.get_contextual_actions();
+
+        let _ = self.tx.send(PlatformMessage::Command {
+            command: "update_state".to_string(),
+            params: serde_json::json!({
+                "path": self.current_path.display().to_string(),
+                "selected": selected_path.unwrap_or_default(),
+                "actions": actions,
+            }),
+        });
+    }
+
+    fn get_contextual_actions(&self) -> Vec<String> {
+        let mut actions = Vec::new();
+
+        // Always show upload when in a directory
+        actions.push("upload".to_string());
+
+        if let Some(idx) = self.selected_index {
+            if let Some(item) = self.items.get(idx) {
+                if !item.is_dir {
+                    actions.push("download".to_string());
+                }
+                actions.push("delete".to_string());
+            }
+        }
+
+        actions
+    }
+
+    fn navigate_to(&mut self, path: PathBuf) {
+        self.current_path = path;
+        self.refresh_directory();
+    }
+
+    fn go_up(&mut self) {
+        if let Some(parent) = self.current_path.parent() {
+            self.navigate_to(parent.to_path_buf());
+        }
+    }
+
+    fn handle_platform_message(&mut self, msg: PlatformMessage) {
+        match msg {
+            PlatformMessage::UploadFile { filename, data } => {
+                let target_path = self.current_path.join(&filename);
+                match base64::engine::general_purpose::STANDARD.decode(data) {
+                    Ok(bytes) => match std::fs::write(&target_path, bytes) {
+                        Ok(_) => {
+                            info!("File uploaded: {}", filename);
+                            self.refresh_directory();
+                            let _ = self.tx.send(PlatformMessage::Command {
+                                command: "success".to_string(),
+                                params: serde_json::json!({
+                                    "message": format!("File {} uploaded successfully", filename)
+                                }),
+                            });
+                        }
+                        Err(e) => {
+                            error!("Failed to write file: {}", e);
+                            let _ = self.tx.send(PlatformMessage::Command {
+                                command: "error".to_string(),
+                                params: serde_json::json!({
+                                    "message": format!("Failed to write file: {}", e)
+                                }),
+                            });
+                        }
+                    },
+                    Err(e) => {
+                        error!("Failed to decode file data: {}", e);
+                        let _ = self.tx.send(PlatformMessage::Command {
+                            command: "error".to_string(),
+                            params: serde_json::json!({
+                                "message": format!("Failed to decode file: {}", e)
+                            }),
+                        });
+                    }
+                }
+            }
+            PlatformMessage::RequestDownload => {
+                if let Some(idx) = self.selected_index {
+                    if let Some(item) = self.items.get(idx) {
+                        if !item.is_dir {
+                            match std::fs::read(&item.path) {
+                                Ok(bytes) => {
+                                    let encoded =
+                                        base64::engine::general_purpose::STANDARD.encode(bytes);
+                                    let _ = self.tx.send(PlatformMessage::Command {
+                                        command: "download_data".to_string(),
+                                        params: serde_json::json!({
+                                            "filename": item.name.clone(),
+                                            "data": encoded
+                                        }),
+                                    });
+                                }
+                                Err(e) => {
+                                    error!("Failed to read file: {}", e);
+                                    let _ = self.tx.send(PlatformMessage::Command {
+                                        command: "error".to_string(),
+                                        params: serde_json::json!({
+                                            "message": format!("Failed to read file: {}", e)
+                                        }),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            PlatformMessage::Delete => {
+                if let Some(idx) = self.selected_index {
+                    if let Some(item) = self.items.get(idx) {
+                        let item_name = item.name.clone();
+                        let item_path = item.path.clone();
+                        let is_dir = item.is_dir;
+                        
+                        let result = if is_dir {
+                            std::fs::remove_dir_all(&item_path)
+                        } else {
+                            std::fs::remove_file(&item_path)
+                        };
+
+                        match result {
+                            Ok(_) => {
+                                info!("Deleted: {}", item_path.display());
+                                self.refresh_directory();
+                                let _ = self.tx.send(PlatformMessage::Command {
+                                    command: "success".to_string(),
+                                    params: serde_json::json!({
+                                        "message": format!("Deleted {}", item_name)
+                                    }),
+                                });
+                            }
+                            Err(e) => {
+                                error!("Failed to delete: {}", e);
+                                let _ = self.tx.send(PlatformMessage::Command {
+                                    command: "error".to_string(),
+                                    params: serde_json::json!({
+                                        "message": format!("Failed to delete: {}", e)
+                                    }),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            PlatformMessage::Command { command, params } => {
+                info!("Received command: {} with params: {:?}", command, params);
+            }
+        }
+    }
+}
+
+impl eframe::App for FileExplorerApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Process incoming messages from platform
+        let mut messages = Vec::new();
+        if let Ok(mut rx) = self.rx.try_lock() {
+            while let Ok(msg) = rx.try_recv() {
+                messages.push(msg);
+            }
+        }
+        for msg in messages {
+            self.handle_platform_message(msg);
+        }
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            // Header with path and navigation
+            ui.horizontal(|ui| {
+                if ui.button("⬆ Up").clicked() {
+                    self.go_up();
+                }
+                ui.label(format!("📁 {}", self.current_path.display()));
+            });
+
+            ui.separator();
+
+            // Error message
+            if let Some(ref error) = self.error_message {
+                ui.colored_label(egui::Color32::RED, error);
+                ui.separator();
+            }
+
+            // File list
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                let mut navigate_to = None;
+                let mut new_selection = None;
+
+                for (idx, item) in self.items.iter().enumerate() {
+                    let is_selected = self.selected_index == Some(idx);
+                    let icon = if item.is_dir { "📁" } else { "📄" };
+
+                    let response = ui.selectable_label(
+                        is_selected,
+                        format!(
+                            "{} {} {}",
+                            icon,
+                            item.name,
+                            if item.is_dir {
+                                String::new()
+                            } else {
+                                format!("({} bytes)", item.size)
+                            }
+                        ),
+                    );
+
+                    if response.clicked() {
+                        if is_selected && item.is_dir {
+                            // Double-click to navigate into directory
+                            navigate_to = Some(item.path.clone());
+                        } else {
+                            new_selection = Some(idx);
+                        }
+                    }
+                }
+
+                // Apply navigation/selection after iteration
+                if let Some(path) = navigate_to {
+                    self.navigate_to(path);
+                } else if let Some(idx) = new_selection {
+                    self.selected_index = Some(idx);
+                    self.refresh_directory(); // Update contextual actions
+                }
+            });
+
+            ui.separator();
+
+            // Action buttons (contextual)
+            ui.horizontal(|ui| {
+                let actions = self.get_contextual_actions();
+
+                if actions.contains(&"upload".to_string()) {
+                    if ui.button("📤 Upload").clicked() {
+                        let _ = self.tx.send(PlatformMessage::Command {
+                            command: "trigger_upload".to_string(),
+                            params: serde_json::json!({}),
+                        });
+                    }
+                }
+
+                if actions.contains(&"download".to_string()) {
+                    if ui.button("📥 Download").clicked() {
+                        let _ = self.tx.send(PlatformMessage::Command {
+                            command: "trigger_download".to_string(),
+                            params: serde_json::json!({}),
+                        });
+                    }
+                }
+
+                if actions.contains(&"delete".to_string()) {
+                    if ui.button("🗑 Delete").clicked() {
+                        if self.selected_index.is_some() {
+                            // Send delete request
+                            self.handle_platform_message(PlatformMessage::Delete);
+                        }
+                    }
+                }
+            });
+        });
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    tracing_subscriber::fmt::init();
+
+    info!("Starting file explorer app...");
+
+    // Connect to platform via Unix socket
+    let socket = UnixStream::connect(SOCKET_PATH)
+        .await
+        .context("Failed to connect to platform socket")?;
+
+    info!("Connected to platform at {}", SOCKET_PATH);
+
+    let (reader, mut writer) = socket.into_split();
+    let mut reader = BufReader::new(reader);
+
+    // Create channels for bidirectional communication
+    let (tx_to_platform, mut rx_from_app) = mpsc::unbounded_channel::<PlatformMessage>();
+    let (tx_to_app, rx_from_platform) = mpsc::unbounded_channel::<PlatformMessage>();
+    let rx_from_platform = Arc::new(Mutex::new(rx_from_platform));
+
+    // Spawn task to read from socket
+    let tx_to_app_clone = tx_to_app.clone();
+    tokio::spawn(async move {
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line).await {
+                Ok(0) => {
+                    info!("Platform disconnected");
+                    break;
+                }
+                Ok(_) => {
+                    if let Ok(msg) = serde_json::from_str::<PlatformMessage>(&line) {
+                        let _ = tx_to_app_clone.send(msg);
+                    } else {
+                        error!("Failed to parse message from platform: {}", line);
+                    }
+                }
+                Err(e) => {
+                    error!("Error reading from socket: {}", e);
+                    break;
+                }
+            }
+        }
+    });
+
+    // Spawn task to write to socket
+    tokio::spawn(async move {
+        while let Some(msg) = rx_from_app.recv().await {
+            if let Ok(json) = serde_json::to_string(&msg) {
+                if let Err(e) = writer.write_all(format!("{}\n", json).as_bytes()).await {
+                    error!("Failed to write to socket: {}", e);
+                    break;
+                }
+            }
+        }
+    });
+
+    // Run the GUI in the main thread
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([800.0, 600.0])
+            .with_title("File Explorer"),
+        ..Default::default()
+    };
+
+    let tx_clone = tx_to_platform.clone();
+    let rx_clone = rx_from_platform.clone();
+
+    // Run egui app (this blocks until the window is closed)
+    let _ = eframe::run_native(
+        "File Explorer",
+        options,
+        Box::new(move |_cc| Ok(Box::new(FileExplorerApp::new(tx_clone, rx_clone)))),
+    );
+
+    Ok(())
+}

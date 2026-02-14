@@ -19,7 +19,10 @@ use webrtc::{
         media_engine::MediaEngine,
         APIBuilder,
     },
-    ice_transport::ice_server::RTCIceServer,
+    ice_transport::{
+        ice_credential_type::RTCIceCredentialType,
+        ice_server::RTCIceServer,
+    },
     peer_connection::{
         configuration::RTCConfiguration,
         peer_connection_state::RTCPeerConnectionState,
@@ -94,17 +97,29 @@ impl WebRTCAdapter {
             webrtc::rtp_transceiver::rtp_codec::RTPCodecType::Video,
         )?;
         
-        // Create API with media engine and default interceptors
+        // Create API with media engine
         let api = APIBuilder::new()
             .with_media_engine(media_engine)
             .build();
         
-        // Configure ICE servers
+        // Configure ICE servers with STUN and TURN
+        let turn_server = std::env::var("TURN_SERVER").unwrap_or_else(|_| "turn:localhost:3478".to_string());
+        let turn_username = std::env::var("TURN_USERNAME").unwrap_or_else(|_| "sandbox".to_string());
+        let turn_credential = std::env::var("TURN_CREDENTIAL").unwrap_or_else(|_| "dev_turn_secret".to_string());
+        
         let config = RTCConfiguration {
-            ice_servers: vec![RTCIceServer {
-                urls: vec!["stun:stun.l.google.com:19302".to_owned()],
-                ..Default::default()
-            }],
+            ice_servers: vec![
+                RTCIceServer {
+                    urls: vec!["stun:stun.l.google.com:19302".to_owned()],
+                    ..Default::default()
+                },
+                RTCIceServer {
+                    urls: vec![turn_server],
+                    username: turn_username,
+                    credential: turn_credential,
+                    credential_type: RTCIceCredentialType::Password,
+                },
+            ],
             ..Default::default()
         };
         

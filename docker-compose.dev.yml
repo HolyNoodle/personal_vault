@@ -45,22 +45,52 @@ services:
       timeout: 5s
       retries: 5
 
+  # Coturn TURN server for WebRTC NAT traversal
+  coturn:
+    image: coturn/coturn:latest
+    container_name: sandbox-coturn-dev
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      - "49152-65535:49152-65535/udp"  # TURN relay ports
+    command:
+      - "turnserver"
+      - "--listening-port=3478"
+      - "--fingerprint"
+      - "--lt-cred-mech"
+      - "--user=sandbox:dev_turn_secret"
+      - "--realm=localhost"
+      - "--log-file=stdout"
+      - "--verbose"
+      - "--min-port=49152"
+      - "--max-port=65535"
+      - "--external-ip=127.0.0.1"
+
   # Rust Backend (Development)
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile.dev
+      context: .
+      dockerfile: backend/Dockerfile.dev
     container_name: sandbox-backend-dev
-    network_mode: host
+    ports:
+      - "8080:8080"
     environment:
-      - DATABASE_URL=postgresql://sandbox_user:sandbox_dev_password@localhost:5432/sandbox_dev
-      - REDIS_URL=redis://localhost:6379
+      - DATABASE_URL=postgresql://sandbox_user:sandbox_dev_password@postgres:5432/sandbox_dev
+      - REDIS_URL=redis://redis:6379
       - RUST_LOG=debug
       - WEBAUTHN_RP_ID=localhost
       - WEBAUTHN_ORIGIN=http://localhost:5173
+      - IPC_SOCKET_PATH=/tmp/ipc/sandbox-ipc.sock
+      - TURN_SERVER=turn:localhost:3478
+      - TURN_USERNAME=sandbox
+      - TURN_CREDENTIAL=dev_turn_secret
     volumes:
-      - ./backend:/app
+      - ./backend:/app/backend
+      - ./shared:/app/shared
+      - ./apps:/app/apps
+      - ./Cargo.toml:/app/Cargo.toml
       - ./storage:/data/storage
+      - ipc_socket:/tmp/ipc
       - cargo_cache:/usr/local/cargo/registry
       - target_cache:/app/target
     depends_on:
@@ -68,6 +98,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    working_dir: /app/backend
     command: cargo watch -x run
 
   # Frontend (Development)
@@ -78,6 +109,7 @@ services:
     container_name: sandbox-frontend-dev
     environment:
       - VITE_API_URL=http://localhost:8080
+      - VITE_WS_URL=ws://localhost:8080/ws
     ports:
       - "5173:5173"
     volumes:
@@ -90,6 +122,7 @@ volumes:
   redis_data:
   cargo_cache:
   target_cache:
+  ipc_socket:
 
 networks:
   default:

@@ -1,0 +1,20 @@
+{
+  "name": "File Explorer",
+  "version": "0.1.0",
+  "description": "Platform-aware file explorer with upload/download capabilities",
+  "permissions": [
+    "filesystem:read",
+    "filesystem:write",
+    "filesystem:delete",
+    "ipc:send",
+    "ipc:receive"
+  ],
+  "capabilities": [
+    "upload",
+    "download",
+    "delete",
+    "preview"
+  ],
+  "command": "./file-explorer",
+  "socket_path": "/tmp/sandbox-ipc-{session_id}.sock"
+}

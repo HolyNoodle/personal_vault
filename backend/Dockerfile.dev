@@ -25,9 +25,10 @@ RUN apt-get update && apt-get install -y \
 # Install cargo-watch for hot-reloading
 RUN cargo install cargo-watch
 
-# Copy manifests
+# Copy workspace structure
 COPY Cargo.toml ./
-COPY Cargo.lock* ./
+COPY shared ./shared
+COPY backend/Cargo.toml backend/Cargo.lock* ./backend/
 
 # Create dummy main to cache dependencies (skip if project is minimal)
 # RUN mkdir src && \
@@ -36,7 +37,7 @@ COPY Cargo.lock* ./
 #     rm -rf src
 
 # Copy source code
-COPY . .
+COPY backend ./backend
 
 # Expose port
 EXPOSE 8080

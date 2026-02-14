@@ -14,7 +14,7 @@ mod application;
 mod infrastructure;
 
 use infrastructure::driving::{WebRTCAdapter};
-use infrastructure::driven::{XvfbManager, FfmpegManager, InMemoryVideoSessionRepository, InMemorySessionRepository, MockApplicationLauncher};
+use infrastructure::driven::{XvfbManager, FfmpegManager, InMemoryVideoSessionRepository, InMemorySessionRepository, MockApplicationLauncher, IpcSocketServer};
 use infrastructure::driven::persistence::{PostgresUserRepository, PostgresCredentialRepository, RedisChallengeRepository};
 use infrastructure::driving::http::video_api::{ApiState, create_video_api_router};
 use infrastructure::driving::http::application_routes::{AppHandlerState, launch_application, list_applications};
@@ -131,6 +131,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Build router (hexagonal architecture - driving adapters)
     let webrtc_clone = Arc::clone(&webrtc_adapter);
+    
+    // Start IPC socket server for app communication
+    let ipc_socket_path = std::env::var("IPC_SOCKET_PATH")
+        .unwrap_or_else(|_| "/tmp/sandbox-ipc.sock".to_string());
+    let ipc_server = Arc::new(IpcSocketServer::new(ipc_socket_path.clone().into()));
+    let ipc_server_clone = ipc_server.clone();
+    
+    tokio::spawn(async move {
+        if let Err(e) = ipc_server_clone.start().await {
+            tracing::error!("IPC server error: {}", e);
+        }
+    });
+    println!("✅ IPC socket server started at {}", ipc_socket_path);
     
     // Auth routes with AppState
     let auth_routes = auth::setup_routes()

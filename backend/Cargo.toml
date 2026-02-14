@@ -11,6 +11,9 @@ keywords = ["webrtc", "sandbox", "security", "streaming"]
 categories = ["web-programming", "multimedia", "network-programming"]
 
 [dependencies]
+# Shared protocol
+shared = { path = "../shared" }
+
 # Web framework
 axum = { version = "0.7", features = ["macros", "ws"] }
 tokio = { version = "1.35", features = ["full"] }
