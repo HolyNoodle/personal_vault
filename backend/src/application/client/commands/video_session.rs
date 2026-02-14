@@ -76,6 +76,9 @@ impl CreateSessionHandler {
         // Store FFmpeg stdout in WebRTC adapter
         webrtc_adapter.set_ffmpeg_stream(session.id.to_string(), ffmpeg_stdout).await;
 
+        // Register input session for keyboard/mouse forwarding
+        webrtc_adapter.register_input_session(session.id.to_string(), display.clone()).await;
+
         // Mark session as ready
         session.mark_ready();
 

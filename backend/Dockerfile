@@ -50,6 +50,7 @@ RUN apt-get update && apt-get install -y \
     dbus-x11 \
     wmctrl \
     openbox \
+    xdotool \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app user

@@ -19,6 +19,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onError
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const pcRef = useRef<RTCPeerConnection | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const mountedRef = useRef(true)
@@ -201,8 +202,64 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, [websocketUrl]) // Only re-run if websocketUrl changes
 
+  // Handle input events
+  useEffect(() => {
+    const container = containerRef.current
+    const ws = wsRef.current
+    if (!container || !ws || ws.readyState !== WebSocket.OPEN) return
+
+    const sendInput = (event: any) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(event))
+      }
+    }
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const rect = container.getBoundingClientRect()
+      const x = Math.round((e.clientX - rect.left) / rect.width * 1920)
+      const y = Math.round((e.clientY - rect.top) / rect.height * 1080)
+      sendInput({ type: 'mouse-move', x, y })
+    }
+
+    const handleMouseDown = (e: MouseEvent) => {
+      const button = e.button === 0 ? 1 : e.button === 2 ? 3 : 2
+      sendInput({ type: 'mouse-down', button })
+    }
+
+    const handleMouseUp = (e: MouseEvent) => {
+      const button = e.button === 0 ? 1 : e.button === 2 ? 3 : 2
+      sendInput({ type: 'mouse-up', button })
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      e.preventDefault()
+      sendInput({ type: 'key-down', key: e.key, code: e.code })
+    }
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      e.preventDefault()
+      sendInput({ type: 'key-up', key: e.key, code: e.code })
+    }
+
+    container.addEventListener('mousemove', handleMouseMove)
+    container.addEventListener('mousedown', handleMouseDown)
+    container.addEventListener('mouseup', handleMouseUp)
+    container.addEventListener('keydown', handleKeyDown)
+    container.addEventListener('keyup', handleKeyUp)
+    container.tabIndex = 0
+    container.focus()
+
+    return () => {
+      container.removeEventListener('mousemove', handleMouseMove)
+      container.removeEventListener('mousedown', handleMouseDown)
+      container.removeEventListener('mouseup', handleMouseUp)
+      container.removeEventListener('keydown', handleKeyDown)
+      container.removeEventListener('keyup', handleKeyUp)
+    }
+  }, [connectionState])
+
   return (
-    <Box sx={{ position: 'relative', width: '100%', height: '100%', minHeight: 400 }}>
+    <Box ref={containerRef} sx={{ position: 'relative', width: '100%', height: '100%', minHeight: 400, outline: 'none' }}>
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
