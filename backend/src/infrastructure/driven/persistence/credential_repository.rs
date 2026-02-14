@@ -16,12 +16,16 @@ impl PostgresCredentialRepository {
 #[async_trait]
 impl CredentialRepository for PostgresCredentialRepository {
     async fn find_by_user_id(&self, user_id: &UserId) -> Result<Vec<Credential>, String> {
+        let uuid_str = user_id.to_string();
+        let uuid = uuid::Uuid::parse_str(&uuid_str)
+            .map_err(|e| format!("Invalid UUID: {}", e))?;
+        
         let rows: Vec<(Vec<u8>, Vec<u8>, i64)> = sqlx::query_as(
             "SELECT credential_id, public_key, sign_count 
              FROM webauthn_credentials 
              WHERE user_id = $1"
         )
-        .bind(user_id.to_string())
+        .bind(uuid)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| format!("Database error: {}", e))?;
@@ -48,11 +52,15 @@ impl CredentialRepository for PostgresCredentialRepository {
         let passkey_json = serde_json::to_string(credential.passkey())
             .map_err(|e| format!("Failed to serialize passkey: {}", e))?;
         
+        let uuid_str = credential.user_id().to_string();
+        let uuid = uuid::Uuid::parse_str(&uuid_str)
+            .map_err(|e| format!("Invalid UUID: {}", e))?;
+        
         sqlx::query(
             "INSERT INTO webauthn_credentials (user_id, credential_id, public_key, sign_count) 
              VALUES ($1, $2, $3, $4)"
         )
-        .bind(credential.user_id().to_string())
+        .bind(uuid)
         .bind(credential.credential_id())
         .bind(passkey_json.as_bytes())
         .bind(credential.sign_count() as i64)
@@ -64,13 +72,17 @@ impl CredentialRepository for PostgresCredentialRepository {
     }
     
     async fn update_sign_count(&self, user_id: &UserId, credential_id: &[u8], sign_count: u32) -> Result<(), String> {
+        let uuid_str = user_id.to_string();
+        let uuid = uuid::Uuid::parse_str(&uuid_str)
+            .map_err(|e| format!("Invalid UUID: {}", e))?;
+        
         sqlx::query(
             "UPDATE webauthn_credentials 
              SET sign_count = $1, updated_at = NOW() 
              WHERE user_id = $2 AND credential_id = $3"
         )
         .bind(sign_count as i64)
-        .bind(user_id.to_string())
+        .bind(uuid)
         .bind(credential_id)
         .execute(&self.pool)
         .await

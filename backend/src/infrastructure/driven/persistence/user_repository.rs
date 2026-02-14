@@ -47,12 +47,16 @@ impl UserRepository for PostgresUserRepository {
     }
     
     async fn find_by_id(&self, id: &UserId) -> Result<Option<User>, String> {
+        let uuid_str = id.to_string();
+        let uuid = uuid::Uuid::parse_str(&uuid_str)
+            .map_err(|e| format!("Invalid UUID: {}", e))?;
+        
         let result: Option<(String, String, String, String, String)> = sqlx::query_as(
             "SELECT id::text, email, display_name, role::text, status::text 
              FROM users 
              WHERE id = $1"
         )
-        .bind(id.to_string())
+        .bind(uuid)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| format!("Database error: {}", e))?;
@@ -90,11 +94,15 @@ impl UserRepository for PostgresUserRepository {
             UserStatus::Deleted => "deleted",
         };
         
+        let uuid_str = user.id().to_string();
+        let uuid = uuid::Uuid::parse_str(&uuid_str)
+            .map_err(|e| format!("Invalid UUID: {}", e))?;
+        
         sqlx::query(
             "INSERT INTO users (id, email, display_name, role, status) 
              VALUES ($1, $2, $3, $4::user_role, $5::user_status)"
         )
-        .bind(user.id().to_string())
+        .bind(uuid)
         .bind(user.email().as_str())
         .bind(user.display_name().as_str())
         .bind(role_str)
