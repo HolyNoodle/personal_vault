@@ -1,86 +1,82 @@
 use axum::{
     routing::get,
     Router,
-    response::Json,
-    extract::State,
+    extract::{WebSocketUpgrade, State},
 };
-use serde_json::json;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use sqlx::postgres::PgPoolOptions;
 use tower_http::cors::{CorsLayer, Any};
-use webauthn_rs::prelude::*;
 
 mod domain;
 mod application;
 mod infrastructure;
 
-use infrastructure::AppState;
-use infrastructure::driven::{PostgresUserRepository, PostgresCredentialRepository, RedisChallengeRepository};
+use infrastructure::driving::{WebRTCAdapter};
+use infrastructure::driven::{XvfbManager, FfmpegManager, InMemoryVideoSessionRepository};
+use infrastructure::driving::http::video_api::{ApiState, create_poc_router};
+use application::client::commands::{CreateSessionHandler, TerminateSessionHandler};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
     
-    println!("Secure Sandbox Server starting...");
+    println!("🚀 WebRTC POC Server starting...");
     
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgresql://sandbox_user:sandbox_password@postgres:5432/sandbox_dev".to_string());
+    // Check prerequisites
+    println!("Checking prerequisites...");
+    check_prerequisites()?;
     
-    let db = PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&database_url)
-        .await?;
+    // Initialize infrastructure adapters (hexagonal architecture - driven adapters)
+    let session_repo = Arc::new(InMemoryVideoSessionRepository::new());
+    let sandbox = Arc::new(XvfbManager::new());
+    let streaming = Arc::new(FfmpegManager::new());
     
-    println!("Connected to database");
+    // Initialize application layer (command handlers)
+    let create_session_handler = Arc::new(CreateSessionHandler::new(
+        session_repo.clone(),
+        sandbox.clone(),
+        streaming.clone(),
+    ));
     
-    let redis_url = std::env::var("REDIS_URL")
-        .unwrap_or_else(|_| "redis://redis:6379".to_string());
+    let terminate_session_handler = Arc::new(TerminateSessionHandler::new(
+        session_repo.clone(),
+        sandbox.clone(),
+        streaming.clone(),
+    ));
     
-    let redis = redis::Client::open(redis_url)?;
-    println!("Connected to Redis");
+    // Initialize driving adapters
+    let webrtc_adapter = Arc::new(WebRTCAdapter::new());
     
-    let rp_origin = Url::parse("http://localhost:5173")?;
-    let rp_id = "localhost";
+    // Create API state
+    let api_state = Arc::new(ApiState {
+        create_session_handler,
+        terminate_session_handler,
+    });
     
-    let webauthn = Arc::new(
-        WebauthnBuilder::new(rp_id, &rp_origin)?
-            .rp_name("Secure Sandbox")
-            .build()?
-    );
-    
-    let jwt_secret = std::env::var("JWT_SECRET")
-        .unwrap_or_else(|_| "dev-secret-key-change-in-production".to_string());
-    
-    // Initialize repositories (driven adapters)
-    let user_repo = Arc::new(PostgresUserRepository::new(db.clone()));
-    let credential_repo = Arc::new(PostgresCredentialRepository::new(db.clone()));
-    let challenge_repo = Arc::new(RedisChallengeRepository::new(redis));
-    
-    let state = AppState {
-        webauthn,
-        jwt_secret,
-        user_repo,
-        credential_repo,
-        challenge_repo,
-    };
-    
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
-    
+    // Build router (hexagonal architecture - driving adapters)
+    let webrtc_clone = Arc::clone(&webrtc_adapter);
     let app = Router::new()
-        .route("/", get(root))
-        .route("/health", get(health))
-        .route("/api/setup/status", get(check_setup_status))
-        .merge(infrastructure::driving::auth_routes())
-        .merge(infrastructure::driving::files_routes())
-        .layer(cors)
-        .with_state(state);
+        .route("/ws", get(|ws: WebSocketUpgrade, State(adapter): State<Arc<WebRTCAdapter>>| async move {
+            use infrastructure::driving::webrtc::handle_socket_internal;
+            ws.on_upgrade(move |socket| handle_socket_internal(socket, adapter))
+        }))
+        .with_state(webrtc_clone)
+        .merge(create_poc_router(api_state))
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any)
+        );
     
+    // Start server
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
-    println!("Listening on http://{}", addr);
+    println!("✅ Server listening on http://{}", addr);
+    println!("\n📋 POC Endpoints:");
+    println!("   - POST http://localhost:8080/api/sessions - Create video session");
+    println!("   - WS   ws://localhost:8080/ws - WebRTC signaling");
+    println!("   - GET  http://localhost:8080/health - Health check");
+    println!("\n⚠️  This is a POC build - authentication disabled for testing\n");
     
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
@@ -88,33 +84,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn root() -> Json<serde_json::Value> {
-    Json(json!({
-        "name": "Secure Sandbox Server",
-        "version": "0.1.0",
-        "status": "running"
-    }))
-}
-
-async fn health() -> Json<serde_json::Value> {
-    Json(json!({
-        "status": "healthy"
-    }))
-}
-
-async fn check_setup_status(State(state): State<AppState>) -> Json<serde_json::Value> {
-    let count = state.user_repo.count_super_admins()
-        .await
-        .unwrap_or(0);
+fn check_prerequisites() -> Result<(), Box<dyn std::error::Error>> {
+    use std::process::Command;
     
-    let is_initialized = count > 0;
+    // Check Xvfb
+    if !Command::new("Xvfb").arg("-help").output().is_ok() {
+        eprintln!("❌ Xvfb not found. Install with: sudo apt-get install xvfb");
+        return Err("Xvfb not installed".into());
+    }
+    println!("✅ Xvfb found");
     
-    Json(json!({
-        "initialized": is_initialized,
-        "message": if is_initialized { 
-            "System is initialized" 
-        } else { 
-            "System requires initial setup" 
-        }
-    }))
+    // Check FFmpeg
+    if !Command::new("ffmpeg").arg("-version").output().is_ok() {
+        eprintln!("❌ FFmpeg not found. Install with: sudo apt-get install ffmpeg");
+        return Err("FFmpeg not installed".into());
+    }
+    println!("✅ FFmpeg found");
+    
+    // Check xterm (optional, for demo app)
+    if !Command::new("xterm").arg("-version").output().is_ok() {
+        println!("⚠️  xterm not found (optional). Install with: sudo apt-get install xterm");
+    } else {
+        println!("✅ xterm found");
+    }
+    
+    Ok(())
 }

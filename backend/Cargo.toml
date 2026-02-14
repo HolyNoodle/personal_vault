@@ -12,13 +12,20 @@ categories = ["web-programming", "multimedia", "network-programming"]
 
 [dependencies]
 # Web framework
-axum = { version = "0.7", features = ["macros"] }
+axum = { version = "0.7", features = ["macros", "ws"] }
 tokio = { version = "1.35", features = ["full"] }
+tokio-util = "0.7"
 tower = "0.4"
 tower-http = { version = "0.5", features = ["fs", "trace", "cors"] }
 
 # WebRTC
 webrtc = "0.9"
+bytes = "1.5"
+
+# WebSocket
+axum-extra = { version = "0.9", features = ["typed-header"] }
+tokio-tungstenite = "0.21"
+futures-util = "0.3"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

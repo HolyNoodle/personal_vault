@@ -51,14 +51,13 @@ services:
       context: ./backend
       dockerfile: Dockerfile.dev
     container_name: sandbox-backend-dev
+    network_mode: host
     environment:
-      - DATABASE_URL=postgresql://sandbox_user:sandbox_dev_password@postgres:5432/sandbox_dev
-      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://sandbox_user:sandbox_dev_password@localhost:5432/sandbox_dev
+      - REDIS_URL=redis://localhost:6379
       - RUST_LOG=debug
       - WEBAUTHN_RP_ID=localhost
       - WEBAUTHN_ORIGIN=http://localhost:5173
-    ports:
-      - "8080:8080"
     volumes:
       - ./backend:/app
       - ./storage:/data/storage

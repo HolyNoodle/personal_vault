@@ -8,6 +8,7 @@ import { Layout } from './components/Layout'
 import { LoginPage } from './pages/LoginPage'
 import { FilesPage } from './pages/FilesPage'
 import { SessionsPage } from './pages/SessionsPage'
+import { VideoSessionPage } from './pages/VideoSessionPage'
 import SetupPage from './pages/SetupPage'
 import { useAuthStore } from './store/authStore'
 import { theme } from './theme'
@@ -70,7 +71,8 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/files" element={<ProtectedRoute><FilesPage /></ProtectedRoute>} />
           <Route path="/sessions" element={<ProtectedRoute><SessionsPage /></ProtectedRoute>} />
-          <Route path="/" element={<Navigate to="/files" replace />} />
+          <Route path="/video-poc" element={<Layout><VideoSessionPage /></Layout>} />
+          <Route path="/" element={<Navigate to="/video-poc" replace />} />
         </Routes>
       </BrowserRouter>
     </ThemeProvider>
