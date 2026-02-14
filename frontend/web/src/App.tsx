@@ -6,6 +6,8 @@ import CircularProgress from '@mui/material/CircularProgress'
 import Box from '@mui/material/Box'
 import { Layout } from './components/Layout'
 import { LoginPage } from './pages/LoginPage'
+import { ApplicationsPage } from './pages/ApplicationsPage'
+import { LaunchApplicationPage } from './pages/LaunchApplicationPage'
 import { FilesPage } from './pages/FilesPage'
 import { SessionsPage } from './pages/SessionsPage'
 import { VideoSessionPage } from './pages/VideoSessionPage'
@@ -69,10 +71,12 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/applications" element={<ProtectedRoute><ApplicationsPage /></ProtectedRoute>} />
+          <Route path="/launch" element={<ProtectedRoute><LaunchApplicationPage /></ProtectedRoute>} />
           <Route path="/files" element={<ProtectedRoute><FilesPage /></ProtectedRoute>} />
           <Route path="/sessions" element={<ProtectedRoute><SessionsPage /></ProtectedRoute>} />
           <Route path="/video" element={<ProtectedRoute><VideoSessionPage /></ProtectedRoute>} />
-          <Route path="/" element={<Navigate to="/login" replace />} />
+          <Route path="/" element={<ProtectedRoute><ApplicationsPage /></ProtectedRoute>} />
         </Routes>
       </BrowserRouter>
     </ThemeProvider>

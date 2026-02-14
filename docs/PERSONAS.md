@@ -62,17 +62,26 @@ The Secure Sandbox Server supports three distinct user personas with different c
 
 **Role:** Person who owns data and controls access to it.
 
-**Purpose:** Share sensitive documents with authorized clients while maintaining control.
+**Purpose:** Manage files and share them securely with authorized clients.
 
 **Capabilities:**
-- ✅ **Data ownership** - Upload files to personal storage
+- ✅ **Full file management** - Upload, organize, delete files via browser-based File Explorer
+- ✅ **Browser mode applications** - Run apps directly in browser with full rights
+- ✅ **Download capability** - Download files to local device
+- ✅ **Copy/paste** - Full clipboard access
 - ✅ **Share management** - Create shares with expiration, access controls
 - ✅ **Access control** - Approve/deny client user connection attempts
 - ✅ **Permission configuration** - Define what clients can access
-- ✅ **Session monitoring** - View active sessions accessing their data
+- ✅ **Session monitoring** - View active sandboxed sessions accessing their data
 - ✅ **Audit logs** - View who accessed their data and when
 - ✅ **Revocation** - Revoke client access at any time
-- ✅ **Settings** - Configure share settings (watermarking, time limits)
+- ✅ **Settings** - Configure share settings (watermarking, time limits, read-only)
+
+**Execution Mode:** **Browser Mode**
+- Applications (File Explorer, etc.) run directly in owner's browser
+- Direct API access to backend for file operations
+- File System Access API for local downloads
+- Full manipulation capabilities
 
 **Restrictions:**
 - ❌ Cannot access other users' data
@@ -81,22 +90,25 @@ The Secure Sandbox Server supports three distinct user personas with different c
 - ❌ Cannot grant super admin privileges
 
 **Use Cases:**
-- Healthcare: Doctor shares patient records with specialists
-- Legal: Lawyer shares case files with clients
-- Finance: Accountant shares tax documents with clients
-- Enterprise: Employee shares confidential reports with partners
+- Healthcare: Doctor organizes patient records, shares with specialists
+- Legal: Lawyer manages case files, shares with clients
+- Finance: Accountant organizes tax documents, shares with customers
+- Enterprise: Employee manages confidential reports, shares with partners
 
 **Workflow Example:**
 ```
-1. User uploads sensitive documents to storage
-2. User creates a "share" for specific files/folders
-3. User generates invitation link or email for client
-4. Client User requests access
-5. User reviews request (IP, location, purpose)
-6. User approves access with time limit (e.g., 2 hours)
-7. Client User can now view files via video stream
-8. User monitors active session
-9. User revokes access when no longer needed
+1. Owner logs in, launches File Explorer (browser mode)
+2. Owner uploads new documents via drag & drop
+3. Owner organizes files into folders
+4. Owner creates a "share" for specific files/folders
+5. Owner configures share: time limit (2 hours), watermarking (enabled)
+6. Owner generates invitation link for client
+7. Client User requests access
+8. Owner reviews request (IP, location, purpose) and approves
+9. Client User accesses files in sandboxed mode (video stream)
+10. Owner monitors active session in real-time
+11. Owner revokes access when no longer needed
+12. Owner downloads backup of shared files
 ```
 
 **Domain Model:**
@@ -111,6 +123,16 @@ pub struct User {
     pub files: Vec<FileReference>,                      // Files they own
     pub shares: Vec<ShareId>,                           // Shares they created
     pub audit_preferences: AuditConfig,                 // Notification settings
+    pub browser_sessions: Vec<BrowserSession>,          // Active browser sessions
+}
+
+pub struct BrowserSession {
+    pub session_id: SessionId,
+    pub app_id: AppId,
+    pub jwt_token: String,
+    pub api_scopes: Vec<String>,
+    pub started_at: DateTime<Utc>,
+    pub last_activity: DateTime<Utc>,
 }
 ```
 
@@ -120,19 +142,29 @@ pub struct User {
 
 **Role:** Person who requests and consumes access to another user's data.
 
-**Purpose:** View sensitive documents without downloading them.
+**Purpose:** View sensitive documents securely without ability to download or exfiltrate data.
 
 **Capabilities:**
 - ✅ **Access request** - Request access to a user's shared data
-- ✅ **Session access** - View files via WebRTC video stream
-- ✅ **Input control** - Mouse/keyboard to navigate documents
-- ✅ **Limited metadata** - View file names (if permitted)
+- ✅ **Sandboxed session** - View files via WebRTC video stream (File Explorer runs server-side)
+- ✅ **Input interaction** - Mouse/keyboard to navigate File Explorer
+- ✅ **File preview** - View PDFs, images, videos inline (no download)
+- ✅ **Navigation** - Browse directory structure
+- ✅ **Limited metadata** - View file names, sizes (if permitted)
 - ✅ **Own audit log** - View their own access history
 
+**Execution Mode:** **Sandboxed Mode**
+- Applications (File Explorer, etc.) run server-side in isolated sandbox
+- WebRTC video stream to client browser
+- Input events forwarded from browser to sandbox
+- Zero data exfiltration - client sees only video pixels
+
 **Restrictions:**
-- ❌ **No downloads** - Cannot download files to local device
+- ❌ **No downloads** - Cannot download files to local device (sees only video)
 - ❌ **No copy/paste** - Clipboard disabled
-- ❌ **No screenshots** - Client-side protections (watermarking)
+- ❌ **No screenshots** - Watermarking enabled (optional per owner)
+- ❌ **No local file access** - Files stay server-side
+- ❌ **No network access** - Sandbox has no internet connectivity
 - ❌ **No data ownership** - Cannot upload files
 - ❌ **No sharing** - Cannot create shares or grant access
 - ❌ **No persistence** - Session data deleted on termination
@@ -140,23 +172,30 @@ pub struct User {
 - ❌ **Cannot view other users' data** (unless separately granted)
 
 **Use Cases:**
-- Specialist views patient records shared by doctor
-- Client reviews contract shared by lawyer
-- Partner accesses financial data shared by accountant
-- Contractor views project files shared by employee
+- Specialist views patient records shared by doctor (cannot download HIPAA data)
+- Client reviews contract shared by lawyer (cannot copy confidential clauses)
+- Partner accesses financial data shared by accountant (cannot export sensitive reports)
+- Contractor views project files shared by employee (cannot save proprietary documents)
 
 **Workflow Example:**
 ```
-1. Client User receives invitation link from User
+1. Client User receives invitation link from Owner
 2. Client User clicks link, sees login/registration page
 3. Client User registers or logs in
 4. System shows access request form
 5. Client User provides purpose, identity verification
 6. Client User submits request
-7. Client User waits for User approval
-8. Upon approval, Client User starts WebRTC session
-9. Client User views documents via video stream
-10. Session automatically terminates after time limit
+7. Client User waits for Owner approval
+8. Upon approval, system creates isolated sandbox server-side
+9. File Explorer app launches in sandbox (Xvfb virtual display)
+10. FFmpeg captures display, encodes to H.264/VP8 video
+11. Client User establishes WebRTC connection
+12. Client User sees File Explorer in video stream
+13. Client User interacts via mouse/keyboard (input forwarding)
+14. Client User navigates files, previews PDFs/images/videos
+15. All interactions logged to audit trail
+16. Session automatically terminates after time limit
+17. Sandbox destroyed, no trace of session remains
 ```
 
 **Domain Model:**
@@ -166,6 +205,20 @@ pub struct ClientUser {
     pub role: UserRole::Client,
     pub email: EmailAddress,
     pub verified: bool,              // Identity verification status
+    pub active_sessions: Vec<SandboxSession>,
+}
+
+pub struct SandboxSession {
+    pub session_id: SessionId,
+    pub app_id: AppId,
+    pub sandbox_id: String,
+    pub webrtc_connection: WebRTCPeerConnection,
+    pub video_stream: VideoStream,
+    pub allowed_paths: Vec<String>,  // Landlock-restricted paths
+    pub constraints: SandboxConstraints,
+    pub started_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+}
     pub access_requests: Vec<AccessRequestId>,
     pub granted_permissions: Vec<PermissionId>,
     pub session_history: Vec<SessionId>,

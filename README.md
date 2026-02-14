@@ -1,6 +1,11 @@
-# Secure Sandbox Monorepo
+# Secure Sandbox Application Platform
 
-A secure WebRTC-based file sandbox server with kernel-level access control using Landlock LSM.
+A dual-execution application platform that runs applications either:
+- **Sandboxed Mode**: Server-side with WebRTC video streaming (for data isolation)
+- **Browser Mode**: Direct browser execution (for data owners)
+
+First application: File Explorer with PDF, image, and video preview.
+Security: Kernel-level isolation using Landlock LSM, namespaces, and WebRTC streaming for zero data exfiltration.
 
 ---
 
@@ -145,14 +150,16 @@ Access:
 
 ## Technical Stack
 
-- **Backend**: Rust (Axum) - Serves API + static frontend files
-- **Frontend**: TypeScript (React/Vue/Svelte) - Built and bundled into backend
+- **Backend**: Rust (Axum) - Application server + API
+- **Applications**: Dual-mode execution (Sandboxed Rust apps + Browser JS/WASM)
+- **Frontend**: TypeScript (React) - File Explorer UI
 - **Database**: PostgreSQL 16
 - **Cache**: Redis 7
 - **Proxy**: HAProxy (TLS termination, load balancing)
 - **Security**: Landlock LSM (kernel-level file access control)
+- **Isolation**: Namespaces, cgroups, seccomp
 - **Authentication**: WebAuthn/FIDO2 (passwordless)
-- **Video Streaming**: WebRTC
+- **Video Streaming**: WebRTC (for sandboxed mode data isolation)
 - **Containerization**: Docker + Docker Compose
 
 ---
@@ -195,7 +202,8 @@ Edit `docker-compose.dev.yml` to change port mappings.
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md)
+- [Application Platform](docs/APPLICATION_PLATFORM.md) - **START HERE** - Dual-execution model
+- [Architecture](docs/ARCHITECTURE.md) - System architecture overview  
 - [Testing Strategy](docs/TESTING.md)
 - [Deployment Guide](DEPLOYMENT_GUIDE.md)
 - [Environment Setup](ENV_SETUP.md)

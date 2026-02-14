@@ -6,16 +6,3 @@ resolver = "2"
 version = "0.1.0"
 edition = "2021"
 authors = ["Sandbox Team"]
-
-[[bin]]
-name = "sandbox-server"
-path = "src/main.rs"
-
-[[bin]]
-name = "create-user"
-path = "src/bin/create_user.rs"
-required-features = []
-
-[lib]
-name = "sandbox_server"
-path = "src/lib.rs"

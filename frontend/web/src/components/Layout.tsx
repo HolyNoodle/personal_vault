@@ -10,6 +10,7 @@ import {
   IconButton,
   Container,
 } from '@mui/material'
+import AppsIcon from '@mui/icons-material/Apps'
 import FolderIcon from '@mui/icons-material/Folder'
 import VideoCallIcon from '@mui/icons-material/VideoCall'
 import LogoutIcon from '@mui/icons-material/Logout'
@@ -37,6 +38,18 @@ export function Layout({ children }: LayoutProps) {
           <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
             {t('app.title')}
           </Typography>
+          
+          <Button
+            color="inherit"
+            startIcon={<AppsIcon />}
+            onClick={() => navigate('/applications')}
+            sx={{ 
+              mx: 1,
+              backgroundColor: location.pathname === '/applications' || location.pathname === '/' ? 'rgba(255,255,255,0.1)' : 'transparent'
+            }}
+          >
+            Applications
+          </Button>
           
           <Button
             color="inherit"

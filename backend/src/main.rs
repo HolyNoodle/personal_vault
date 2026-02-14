@@ -14,12 +14,13 @@ mod application;
 mod infrastructure;
 
 use infrastructure::driving::{WebRTCAdapter};
-use infrastructure::driven::{XvfbManager, FfmpegManager, InMemoryVideoSessionRepository};
+use infrastructure::driven::{XvfbManager, FfmpegManager, InMemoryVideoSessionRepository, InMemorySessionRepository, MockApplicationLauncher};
 use infrastructure::driven::persistence::{PostgresUserRepository, PostgresCredentialRepository, RedisChallengeRepository};
 use infrastructure::driving::http::video_api::{ApiState, create_video_api_router};
+use infrastructure::driving::http::application_routes::{AppHandlerState, launch_application, list_applications};
 use infrastructure::driving::http::auth;
 use infrastructure::AppState;
-use application::client::commands::{CreateSessionHandler, TerminateSessionHandler};
+use application::client::commands::{CreateSessionHandler, TerminateSessionHandler, ApplicationLauncherService};
 use application::ports::{UserRepository, CredentialRepository, ChallengeRepository};
 
 #[tokio::main]
@@ -99,6 +100,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         streaming.clone(),
     ));
     
+    // Initialize APPLICATION PLATFORM infrastructure
+    let app_session_repo = Arc::new(InMemorySessionRepository::new());
+    let app_launcher = Arc::new(MockApplicationLauncher);
+    let sandbox_isolation = Arc::new(infrastructure::driven::sandbox::isolation::MockSandboxIsolation);
+    
+    // Initialize application launcher service
+    let launcher_service = Arc::new(ApplicationLauncherService::new(
+        app_session_repo.clone(),
+        app_launcher.clone(),
+        sandbox_isolation.clone(),
+    ));
+    
+    // Create application handler state
+    let app_handler_state = AppHandlerState {
+        launcher_service: Arc::clone(&launcher_service),
+    };
+    
     // Initialize driving adapters
     let webrtc_adapter = Arc::new(WebRTCAdapter::new());
     
@@ -121,11 +139,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/ws", get(infrastructure::driving::webrtc::ws_handler))
         .with_state(webrtc_clone);
     
+    // Application platform routes
+    let app_routes = Router::new()
+        .route("/api/applications", axum::routing::get(list_applications))
+        .route("/api/applications/launch", axum::routing::post(launch_application))
+        .with_state(app_handler_state);
+    
     // Merge all routes
     let app = Router::new()
         .merge(auth_routes)
         .merge(ws_routes)
         .merge(create_video_api_router(api_state))
+        .merge(app_routes)
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)
@@ -137,10 +162,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
     println!("✅ Server listening on http://{}", addr);
     println!("\n📋 Available Endpoints:");
+    println!("   AUTH:");
+    println!("   - POST http://localhost:8080/api/auth/register - Register new user");
+    println!("   - POST http://localhost:8080/api/auth/login - Login");
+    println!("   APPLICATION PLATFORM:");
+    println!("   - GET  http://localhost:8080/api/applications - List available applications");
+    println!("   - POST http://localhost:8080/api/applications/launch - Launch application (sandboxed)");
+    println!("   LEGACY VIDEO:");
     println!("   - POST http://localhost:8080/api/sessions - Create video session");
     println!("   - WS   ws://localhost:8080/ws - WebRTC signaling");
+    println!("   SYSTEM:");
     println!("   - GET  http://localhost:8080/health - Health check");
     println!();
+
     
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;

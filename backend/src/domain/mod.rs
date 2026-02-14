@@ -5,8 +5,10 @@ pub mod entities;
 pub mod aggregates;
 pub mod value_objects;
 pub mod events;
+pub mod apps;
 
 pub use entities::*;
 pub use aggregates::*;
+pub use apps::*;
 pub use value_objects::*;
 pub use events::*;
