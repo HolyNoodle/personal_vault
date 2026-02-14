@@ -2,14 +2,13 @@
 // Implements interfaces defined in application layer
 
 use std::sync::Arc;
-use axum::{async_trait, extract::FromRequestParts, http::{StatusCode, request::Parts}};
+use axum::{async_trait, extract::{FromRequestParts, FromRef}, http::{StatusCode, request::Parts}};
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use crate::application::ports::{UserRepository, CredentialRepository, ChallengeRepository};
 
-pub mod persistence;
-pub mod filesystem;
-pub mod messaging;
+pub mod driven;    // Output adapters (repositories, external services)
+pub mod driving;   // Input adapters (HTTP, CLI, etc.)
 
 #[derive(Clone)]
 pub struct AppState {

@@ -1,0 +1,62 @@
+/* Example CSS Module - use .module.css suffix for scoped styles */
+
+.container {
+  padding: 2rem;
+  background-color: var(--background-color);
+}
+
+.title {
+  font-size: 2rem;
+  font-weight: bold;
+  color: var(--primary-color);
+  margin-bottom: 1rem;
+}
+
+.card {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.button {
+  padding: 0.75rem 1.5rem;
+  border-radius: 4px;
+  border: none;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.buttonPrimary {
+  composes: button;
+  background-color: #3f51b5;
+  color: white;
+}
+
+.buttonPrimary:hover {
+  background-color: #303f9f;
+}
+
+.buttonSecondary {
+  composes: button;
+  background-color: transparent;
+  border: 1px solid #3f51b5;
+  color: #3f51b5;
+}
+
+/* Usage example:
+import styles from './Example.module.css'
+
+function Component() {
+  return (
+    <div className={styles.container}>
+      <h1 className={styles.title}>Title</h1>
+      <div className={styles.card}>
+        <button className={styles.buttonPrimary}>Primary</button>
+        <button className={styles.buttonSecondary}>Secondary</button>
+      </div>
+    </div>
+  )
+}
+*/

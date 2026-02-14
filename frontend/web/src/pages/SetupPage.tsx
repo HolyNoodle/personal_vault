@@ -1,4 +1,18 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Formik, Form } from 'formik';
+import * as Yup from 'yup';
+import {
+  Container,
+  Paper,
+  Typography,
+  TextField,
+  Button,
+  Alert,
+  Box,
+} from '@mui/material';
+import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
+import SecurityIcon from '@mui/icons-material/Security';
 
 interface SetupPageProps {
   onSetupComplete: () => void;
@@ -44,13 +58,16 @@ function convertCredentialCreationOptions(options: any): PublicKeyCredentialCrea
 }
 
 function SetupPage({ onSetupComplete }: SetupPageProps) {
-  const [email, setEmail] = useState('');
-  const [displayName, setDisplayName] = useState('');
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const validationSchema = Yup.object({
+    email: Yup.string().email('Invalid email').required('Email is required'),
+    displayName: Yup.string().required('Display name is required'),
+  });
+
+  const handleSubmit = async (values: { email: string; displayName: string }) => {
     setLoading(true);
     setError('');
 
@@ -59,7 +76,7 @@ function SetupPage({ onSetupComplete }: SetupPageProps) {
       const initiateRes = await fetch('http://localhost:8080/api/setup/initiate-registration', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, display_name: displayName }),
+        body: JSON.stringify({ email: values.email, display_name: values.displayName }),
       });
 
       if (!initiateRes.ok) {
@@ -98,8 +115,8 @@ function SetupPage({ onSetupComplete }: SetupPageProps) {
             },
             type: credential.type,
           },
-          email,
-          display_name: displayName,
+          email: values.email,
+          display_name: values.displayName,
         }),
       });
 
@@ -119,110 +136,89 @@ function SetupPage({ onSetupComplete }: SetupPageProps) {
   };
 
   return (
-    <div style={{ 
-      display: 'flex', 
-      justifyContent: 'center', 
-      alignItems: 'center', 
-      minHeight: '100vh'
-    }}>
-      <div style={{
-        backgroundColor: 'white',
-        padding: '2rem',
-        borderRadius: '8px',
-        boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
-        width: '100%',
-        maxWidth: '400px'
-      }}>
-        <h1 style={{ marginBottom: '0.5rem' }}>Initial Setup</h1>
-        <p style={{ color: '#666', marginBottom: '2rem' }}>
-          No super admin exists. Set up the first super admin account with a hardware security key.
-        </p>
+    <Container maxWidth="sm">
+      <Box
+        display="flex"
+        flexDirection="column"
+        justifyContent="center"
+        alignItems="center"
+        minHeight="100vh"
+      >
+        <Paper elevation={3} sx={{ p: 4, width: '100%' }}>
+          <Box display="flex" alignItems="center" gap={2} mb={2}>
+            <AdminPanelSettingsIcon fontSize="large" color="primary" />
+            <Typography variant="h4" component="h1">
+              {t('auth.setup.title')}
+            </Typography>
+          </Box>
 
-        {error && (
-          <div style={{
-            backgroundColor: '#fee',
-            color: '#c00',
-            padding: '0.75rem',
-            borderRadius: '4px',
-            marginBottom: '1rem'
-          }}>
-            {error}
-          </div>
-        )}
+          <Typography variant="body1" color="text.secondary" mb={3}>
+            {t('auth.setup.description')}
+          </Typography>
 
-        <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: '1rem' }}>
-            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
-              Email
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              style={{
-                width: '100%',
-                padding: '0.5rem',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                fontSize: '1rem'
-              }}
-              placeholder="admin@example.com"
-            />
-          </div>
+          {error && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {error}
+            </Alert>
+          )}
 
-          <div style={{ marginBottom: '1.5rem' }}>
-            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
-              Display Name
-            </label>
-            <input
-              type="text"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              required
-              style={{
-                width: '100%',
-                padding: '0.5rem',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                fontSize: '1rem'
-              }}
-              placeholder="System Administrator"
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            style={{
-              width: '100%',
-              padding: '0.75rem',
-              backgroundColor: '#007bff',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              fontSize: '1rem',
-              fontWeight: 500,
-              cursor: loading ? 'not-allowed' : 'pointer',
-              opacity: loading ? 0.6 : 1
-            }}
+          <Formik
+            initialValues={{ email: '', displayName: '' }}
+            validationSchema={validationSchema}
+            onSubmit={handleSubmit}
           >
-            {loading ? 'Registering...' : 'Register with Security Key'}
-          </button>
+            {({ values, errors, touched, handleChange, handleBlur }) => (
+              <Form>
+                <TextField
+                  fullWidth
+                  id="email"
+                  name="email"
+                  label={t('auth.setup.emailLabel')}
+                  placeholder={t('auth.setup.emailPlaceholder')}
+                  value={values.email}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
+                  error={touched.email && Boolean(errors.email)}
+                  helperText={touched.email && errors.email}
+                  margin="normal"
+                  type="email"
+                />
 
-          <div style={{
-            marginTop: '1rem',
-            padding: '0.75rem',
-            backgroundColor: '#f0f8ff',
-            borderRadius: '4px',
-            fontSize: '0.875rem',
-            color: '#666'
-          }}>
-            <strong>Note:</strong> You will need a WebAuthn-compatible security key (YubiKey, etc.) or platform authenticator (Touch ID, Windows Hello) to complete registration.
-          </div>
-        </form>
-      </div>
-    </div>
+                <TextField
+                  fullWidth
+                  id="displayName"
+                  name="displayName"
+                  label={t('auth.setup.displayNameLabel')}
+                  placeholder={t('auth.setup.displayNamePlaceholder')}
+                  value={values.displayName}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
+                  error={touched.displayName && Boolean(errors.displayName)}
+                  helperText={touched.displayName && errors.displayName}
+                  margin="normal"
+                />
+
+                <Button
+                  type="submit"
+                  fullWidth
+                  variant="contained"
+                  size="large"
+                  disabled={loading}
+                  startIcon={<SecurityIcon />}
+                  sx={{ mt: 3 }}
+                >
+                  {loading ? 'Registering...' : t('auth.setup.registerButton')}
+                </Button>
+
+                <Alert severity="info" sx={{ mt: 2 }}>
+                  <strong>Note:</strong> You will need a WebAuthn-compatible security key (YubiKey, etc.) or platform authenticator (Touch ID, Windows Hello) to complete registration.
+                </Alert>
+              </Form>
+            )}
+          </Formik>
+        </Paper>
+      </Box>
+    </Container>
   );
 }
 

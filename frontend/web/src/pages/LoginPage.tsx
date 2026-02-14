@@ -1,5 +1,18 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
+import { Formik, Form } from 'formik'
+import * as Yup from 'yup'
+import {
+  Container,
+  Paper,
+  Typography,
+  TextField,
+  Button,
+  Alert,
+  Box,
+} from '@mui/material'
+import SecurityIcon from '@mui/icons-material/Security'
 import { useAuthStore } from '../store/authStore'
 
 // Helper functions for WebAuthn data conversion
@@ -34,14 +47,17 @@ function convertCredentialRequestOptions(options: any): PublicKeyCredentialReque
 }
 
 export function LoginPage() {
-  const [email, setEmail] = useState('')
+  const { t } = useTranslation()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const navigate = useNavigate()
   const login = useAuthStore((state) => state.login)
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const validationSchema = Yup.object({
+    email: Yup.string().email('Invalid email').required('Email is required'),
+  })
+
+  const handleLogin = async (values: { email: string }) => {
     setLoading(true)
     setError('')
 
@@ -50,7 +66,7 @@ export function LoginPage() {
       const initiateRes = await fetch('http://localhost:8080/api/auth/initiate-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email: values.email }),
       });
 
       if (!initiateRes.ok) {
@@ -95,7 +111,7 @@ export function LoginPage() {
             },
             type: credential.type,
           },
-          email,
+          email: values.email,
         }),
       });
 
@@ -118,72 +134,70 @@ export function LoginPage() {
   }
 
   return (
-    <div style={{ 
-      display: 'flex', 
-      justifyContent: 'center', 
-      alignItems: 'center', 
-      minHeight: '100vh',
-      background: '#242424'
-    }}>
-      <div style={{ 
-        background: '#1a1a1a', 
-        padding: '2rem', 
-        borderRadius: '8px',
-        width: '400px'
-      }}>
-        <h1 style={{ marginBottom: '2rem', fontSize: '2rem' }}>Secure Sandbox</h1>
-        
-        {error && (
-          <div style={{
-            backgroundColor: '#fee',
-            color: '#c00',
-            padding: '0.75rem',
-            borderRadius: '4px',
-            marginBottom: '1rem'
-          }}>
-            {error}
-          </div>
-        )}
-        
-        <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          <div>
-            <label htmlFor="email" style={{ display: 'block', marginBottom: '0.5rem' }}>
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              style={{
-                width: '100%',
-                padding: '0.5rem',
-                borderRadius: '4px',
-                border: '1px solid #333',
-                background: '#242424',
-                color: '#fff'
-              }}
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={loading}
-            style={{
-              marginTop: '1rem',
-              padding: '0.75rem',
-              backgroundColor: loading ? '#666' : '#007bff',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              fontSize: '1rem',
-              cursor: loading ? 'not-allowed' : 'pointer',
-            }}
+    <Container maxWidth="sm">
+      <Box
+        display="flex"
+        flexDirection="column"
+        justifyContent="center"
+        alignItems="center"
+        minHeight="100vh"
+      >
+        <Paper elevation={3} sx={{ p: 4, width: '100%' }}>
+          <Box display="flex" alignItems="center" gap={2} mb={3}>
+            <SecurityIcon fontSize="large" color="primary" />
+            <Typography variant="h4" component="h1">
+              {t('auth.login.title')}
+            </Typography>
+          </Box>
+
+          <Typography variant="body1" color="text.secondary" mb={3}>
+            {t('auth.login.description')}
+          </Typography>
+
+          {error && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {error}
+            </Alert>
+          )}
+
+          <Formik
+            initialValues={{ email: '' }}
+            validationSchema={validationSchema}
+            onSubmit={handleLogin}
           >
-            {loading ? 'Authenticating...' : 'Login with Security Key'}
-          </button>
-        </form>
-      </div>
-    </div>
+            {({ values, errors, touched, handleChange, handleBlur }) => (
+              <Form>
+                <TextField
+                  fullWidth
+                  id="email"
+                  name="email"
+                  label={t('auth.login.emailLabel')}
+                  placeholder={t('auth.login.emailPlaceholder')}
+                  value={values.email}
+                  onChange={handleChange}
+                  onBlur={handleBlur}
+                  error={touched.email && Boolean(errors.email)}
+                  helperText={touched.email && errors.email}
+                  margin="normal"
+                  type="email"
+                />
+
+                <Button
+                  type="submit"
+                  fullWidth
+                  variant="contained"
+                  size="large"
+                  disabled={loading}
+                  startIcon={<SecurityIcon />}
+                  sx={{ mt: 3 }}
+                >
+                  {loading ? 'Authenticating...' : t('auth.login.loginButton')}
+                </Button>
+              </Form>
+            )}
+          </Formik>
+        </Paper>
+      </Box>
+    </Container>
   )
 }

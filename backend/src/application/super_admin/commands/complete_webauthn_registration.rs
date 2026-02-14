@@ -1,7 +1,7 @@
 use axum::http::StatusCode;
 use webauthn_rs::prelude::*;
 use crate::infrastructure::AppState;
-use crate::application::ports::{User, UserRole, UserStatus, WebAuthnCredential};
+use crate::domain::{User, Credential, Email, DisplayName, UserRole};
 
 pub async fn execute(
     state: &AppState,
@@ -25,38 +25,31 @@ pub async fn execute(
         .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
     
     // Create user entity
-    let user_id = uuid::Uuid::new_v4();
-    let user = User {
-        id: user_id,
-        email: email.to_string(),
-        display_name: display_name.to_string(),
-        role: UserRole::SuperAdmin,
-        status: UserStatus::Active,
-    };
+    let user_email = Email::new(email.to_string())
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    let user_display_name = DisplayName::new(display_name.to_string())
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
     
-    println!("Creating user with id: {}", user_id);
+    let user = User::new(user_email, user_display_name, UserRole::SuperAdmin);
+    
+    println!("Creating user with id: {}", user.id());
     
     // Persist user through repository
-    state.user_repo.create(&user)
+    state.user_repo.save(&user)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     
     println!("User created, now creating credential");
     
     // Create credential entity
-    let credential = WebAuthnCredential {
-        user_id,
-        credential_id: passkey.cred_id().0.to_vec(),
-        passkey,
-        sign_count: 0,
-    };
+    let credential = Credential::new(user.id().clone(), passkey);
     
     // Persist credential through repository
-    state.credential_repo.create(&credential)
+    state.credential_repo.save(&credential)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     
-    println!("Super admin created: {} ({})", email, user_id);
+    println!("Super admin created: {} ({})", user.email(), user.id());
     Ok(())
 }
 

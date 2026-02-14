@@ -1,0 +1,48 @@
+{
+  "app": {
+    "title": "WebRTC Sandbox"
+  },
+  "auth": {
+    "setup": {
+      "title": "Super Admin Setup",
+      "description": "Set up the first super admin account using a hardware security key",
+      "emailLabel": "Email",
+      "emailPlaceholder": "admin@example.com",
+      "displayNameLabel": "Display Name",
+      "displayNamePlaceholder": "John Doe",
+      "registerButton": "Register with Security Key",
+      "success": "Super admin registered successfully!",
+      "error": "Registration failed"
+    },
+    "login": {
+      "title": "Login",
+      "description": "Sign in using your hardware security key",
+      "emailLabel": "Email",
+      "emailPlaceholder": "admin@example.com",
+      "loginButton": "Login with Security Key",
+      "success": "Login successful!",
+      "error": "Login failed"
+    }
+  },
+  "files": {
+    "title": "My Files",
+    "uploadButton": "Upload File",
+    "createFolderButton": "Create Folder",
+    "noFiles": "No files yet",
+    "columns": {
+      "name": "Name",
+      "type": "Type",
+      "size": "Size",
+      "modified": "Modified"
+    }
+  },
+  "sessions": {
+    "title": "Active Sessions",
+    "noSessions": "No active sessions"
+  },
+  "nav": {
+    "files": "Files",
+    "sessions": "Sessions",
+    "logout": "Logout"
+  }
+}

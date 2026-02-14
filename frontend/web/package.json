@@ -10,12 +10,19 @@
     "test": "vitest"
   },
   "dependencies": {
-    "@mui/material": "^5.15.0",
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/icons-material": "^7.3.8",
+    "@mui/material": "^7.3.8",
     "@simplewebauthn/browser": "^9.0.0",
     "axios": "^1.6.0",
+    "formik": "^2.4.9",
+    "i18next": "^25.8.7",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-i18next": "^16.5.4",
     "react-router-dom": "^6.20.0",
+    "yup": "^1.7.1",
     "zustand": "^4.4.0"
   },
   "devDependencies": {

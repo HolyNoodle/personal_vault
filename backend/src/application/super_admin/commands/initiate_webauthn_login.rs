@@ -1,6 +1,7 @@
 use axum::http::StatusCode;
 use webauthn_rs::prelude::*;
 use crate::infrastructure::AppState;
+use crate::domain::Email;
 
 pub struct LoginInitiateResult {
     pub options: RequestChallengeResponse,
@@ -11,14 +12,18 @@ pub async fn execute(
     state: &AppState,
     email: &str,
 ) -> Result<LoginInitiateResult, (StatusCode, String)> {
+    // Parse email
+    let email = Email::new(email.to_string())
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    
     // Find user by email
-    let user = state.user_repo.find_by_email(email)
+    let user = state.user_repo.find_by_email(&email)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
         .ok_or((StatusCode::NOT_FOUND, "User not found".to_string()))?;
     
     // Get user's credentials
-    let credentials = state.credential_repo.find_by_user_id(&user.id)
+    let credentials = state.credential_repo.find_by_user_id(user.id())
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     
@@ -30,7 +35,7 @@ pub async fn execute(
     
     let passkeys: Vec<Passkey> = credentials
         .into_iter()
-        .map(|c| c.passkey)
+        .map(|c| c.passkey().clone())
         .collect();
     
     // Generate WebAuthn challenge

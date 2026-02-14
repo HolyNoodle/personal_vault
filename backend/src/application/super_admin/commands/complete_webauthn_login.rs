@@ -2,6 +2,7 @@ use axum::http::StatusCode;
 use webauthn_rs::prelude::*;
 use jsonwebtoken::{encode, Header, EncodingKey};
 use crate::infrastructure::AppState;
+use crate::domain::Email;
 
 pub struct LoginCompleteResult {
     pub token: String,
@@ -31,15 +32,19 @@ pub async fn execute(
         .finish_passkey_authentication(&credential, &auth_state)
         .map_err(|e| (StatusCode::UNAUTHORIZED, e.to_string()))?;
     
+    // Parse email
+    let email = Email::new(email.to_string())
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    
     // Find user by email
-    let user = state.user_repo.find_by_email(email)
+    let user = state.user_repo.find_by_email(&email)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
         .ok_or((StatusCode::NOT_FOUND, "User not found".to_string()))?;
     
     // Update sign count
     state.credential_repo
-        .update_sign_count(&user.id, auth_result.cred_id().0.as_slice(), auth_result.counter() as i64)
+        .update_sign_count(user.id(), auth_result.cred_id().0.as_slice(), auth_result.counter())
         .await
         .ok(); // Non-critical, don't fail if update fails
     
@@ -56,11 +61,11 @@ pub async fn execute(
         .expect("valid timestamp")
         .timestamp() as usize;
     
-    let role_str = format!("{:?}", user.role);
+    let role_str = format!("{:?}", user.role());
     
     let claims = Claims {
-        sub: user.id.to_string(),
-        email: user.email.clone(),
+        sub: user.id().to_string(),
+        email: user.email().to_string(),
         role: role_str.clone(),
         exp: expiration,
     };
@@ -72,13 +77,13 @@ pub async fn execute(
     )
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
-    println!("User logged in: {} ({})", user.email, user.id);
+    println!("User logged in: {} ({})", user.email(), user.id());
     
     Ok(LoginCompleteResult {
         token,
-        user_id: user.id.to_string(),
-        email: user.email,
-        display_name: user.display_name,
+        user_id: user.id().to_string(),
+        email: user.email().to_string(),
+        display_name: user.display_name().to_string(),
         role: role_str,
     })
 }

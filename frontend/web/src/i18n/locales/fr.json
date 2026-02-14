@@ -1,0 +1,48 @@
+{
+  "app": {
+    "title": "Sandbox WebRTC"
+  },
+  "auth": {
+    "setup": {
+      "title": "Configuration Super Admin",
+      "description": "Configurez le premier compte super admin avec une clé de sécurité matérielle",
+      "emailLabel": "Email",
+      "emailPlaceholder": "admin@exemple.com",
+      "displayNameLabel": "Nom d'affichage",
+      "displayNamePlaceholder": "Jean Dupont",
+      "registerButton": "Enregistrer avec Clé de Sécurité",
+      "success": "Super admin enregistré avec succès !",
+      "error": "Échec de l'enregistrement"
+    },
+    "login": {
+      "title": "Connexion",
+      "description": "Connectez-vous avec votre clé de sécurité matérielle",
+      "emailLabel": "Email",
+      "emailPlaceholder": "admin@exemple.com",
+      "loginButton": "Connexion avec Clé de Sécurité",
+      "success": "Connexion réussie !",
+      "error": "Échec de la connexion"
+    }
+  },
+  "files": {
+    "title": "Mes Fichiers",
+    "uploadButton": "Téléverser un Fichier",
+    "createFolderButton": "Créer un Dossier",
+    "noFiles": "Aucun fichier pour le moment",
+    "columns": {
+      "name": "Nom",
+      "type": "Type",
+      "size": "Taille",
+      "modified": "Modifié"
+    }
+  },
+  "sessions": {
+    "title": "Sessions Actives",
+    "noSessions": "Aucune session active"
+  },
+  "nav": {
+    "files": "Fichiers",
+    "sessions": "Sessions",
+    "logout": "Déconnexion"
+  }
+}

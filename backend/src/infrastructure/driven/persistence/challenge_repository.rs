@@ -20,7 +20,7 @@ impl ChallengeRepository for RedisChallengeRepository {
             .map_err(|e| format!("Redis connection error: {}", e))?;
         
         let key = format!("webauthn:challenge:{}", challenge_id);
-        conn.set_ex(&key, state, ttl_seconds as usize)
+        conn.set_ex::<_, _, ()>(&key, state, ttl_seconds)
             .await
             .map_err(|e| format!("Failed to save challenge: {}", e))?;
         
@@ -44,7 +44,7 @@ impl ChallengeRepository for RedisChallengeRepository {
             .map_err(|e| format!("Redis connection error: {}", e))?;
         
         let key = format!("webauthn:auth:{}", challenge_id);
-        conn.set_ex(&key, state, ttl_seconds as usize)
+        conn.set_ex::<_, _, ()>(&key, state, ttl_seconds)
             .await
             .map_err(|e| format!("Failed to save auth challenge: {}", e))?;
         

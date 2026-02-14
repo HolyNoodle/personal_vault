@@ -13,12 +13,11 @@ pub async fn execute(
     display_name: &str,
 ) -> Result<RegistrationResult, (StatusCode, String)> {
     let user_unique_id = uuid::Uuid::new_v4();
-    let user_id = user_unique_id.as_bytes();
     
     // Generate WebAuthn challenge
     let (challenge, reg_state) = state.webauthn
         .start_passkey_registration(
-            user_id.into(),
+            user_unique_id,
             email,
             display_name,
             None,

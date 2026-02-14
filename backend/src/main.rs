@@ -3,7 +3,6 @@ use axum::{
     Router,
     response::Json,
     extract::State,
-    http::StatusCode,
 };
 use serde_json::json;
 use std::net::SocketAddr;
@@ -15,10 +14,9 @@ use webauthn_rs::prelude::*;
 mod domain;
 mod application;
 mod infrastructure;
-mod adapters;
 
 use infrastructure::AppState;
-use infrastructure::persistence::{PostgresUserRepository, PostgresCredentialRepository, RedisChallengeRepository};
+use infrastructure::driven::{PostgresUserRepository, PostgresCredentialRepository, RedisChallengeRepository};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -54,7 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let jwt_secret = std::env::var("JWT_SECRET")
         .unwrap_or_else(|_| "dev-secret-key-change-in-production".to_string());
     
-    // Initialize repositories
+    // Initialize repositories (driven adapters)
     let user_repo = Arc::new(PostgresUserRepository::new(db.clone()));
     let credential_repo = Arc::new(PostgresCredentialRepository::new(db.clone()));
     let challenge_repo = Arc::new(RedisChallengeRepository::new(redis));
@@ -76,8 +74,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/", get(root))
         .route("/health", get(health))
         .route("/api/setup/status", get(check_setup_status))
-        .merge(adapters::http::auth::setup_routes())
-        .merge(adapters::http::files::files_routes())
+        .merge(infrastructure::driving::auth_routes())
+        .merge(infrastructure::driving::files_routes())
         .layer(cors)
         .with_state(state);
     
@@ -120,5 +118,3 @@ async fn check_setup_status(State(state): State<AppState>) -> Json<serde_json::V
         }
     }))
 }
-
-where

@@ -1,4 +1,24 @@
 import { useState, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
+import {
+  Box,
+  Typography,
+  Button,
+  Alert,
+  Paper,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  IconButton,
+} from '@mui/material'
+import UploadFileIcon from '@mui/icons-material/UploadFile'
+import CreateNewFolderIcon from '@mui/icons-material/CreateNewFolder'
+import DownloadIcon from '@mui/icons-material/Download'
+import FolderIcon from '@mui/icons-material/Folder'
+import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile'
 import { useAuthStore } from '../store/authStore'
 
 interface FileItem {
@@ -11,6 +31,7 @@ interface FileItem {
 }
 
 export function FilesPage() {
+  const { t } = useTranslation()
   const { token } = useAuthStore()
   const [files, setFiles] = useState<FileItem[]>([])
   const [currentPath, setCurrentPath] = useState('/')
@@ -82,94 +103,90 @@ export function FilesPage() {
   }
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-        <h1>Files</h1>
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={uploading}
-          style={{
-            padding: '0.75rem 1.5rem',
-            background: '#0066cc',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: uploading ? 'not-allowed' : 'pointer',
-            fontSize: '1rem',
-          }}
-        >
-          {uploading ? 'Uploading...' : '+ Upload File'}
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          onChange={handleFileUpload}
-          style={{ display: 'none' }}
-        />
-      </div>
+    <Box>
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+        <Typography variant="h4" component="h1">
+          {t('files.title')}
+        </Typography>
+        <Box display="flex" gap={2}>
+          <Button
+            variant="outlined"
+            startIcon={<CreateNewFolderIcon />}
+            disabled
+          >
+            {t('files.createFolderButton')}
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<UploadFileIcon />}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+          >
+            {uploading ? 'Uploading...' : t('files.uploadButton')}
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            onChange={handleFileUpload}
+            style={{ display: 'none' }}
+          />
+        </Box>
+      </Box>
 
       {error && (
-        <div style={{
-          background: '#440000',
-          color: '#ff6b6b',
-          padding: '1rem',
-          borderRadius: '4px',
-          marginBottom: '1rem',
-        }}>
+        <Alert severity="error" sx={{ mb: 2 }}>
           {error}
-        </div>
+        </Alert>
       )}
 
-      <div style={{ background: '#1a1a1a', borderRadius: '8px', overflow: 'hidden' }}>
+      <TableContainer component={Paper}>
         {files.length === 0 ? (
-          <div style={{ padding: '3rem', textAlign: 'center', color: '#888' }}>
-            <p>No files yet</p>
-            <p style={{ marginTop: '0.5rem', fontSize: '0.9rem' }}>
+          <Box p={6} textAlign="center">
+            <Typography variant="h6" color="text.secondary" gutterBottom>
+              {t('files.noFiles')}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
               Upload your first file to get started
-            </p>
-          </div>
+            </Typography>
+          </Box>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ background: '#252525', borderBottom: '1px solid #333' }}>
-                <th style={{ padding: '1rem', textAlign: 'left' }}>Name</th>
-                <th style={{ padding: '1rem', textAlign: 'left' }}>Size</th>
-                <th style={{ padding: '1rem', textAlign: 'left' }}>Created</th>
-                <th style={{ padding: '1rem', textAlign: 'right' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>{t('files.columns.name')}</TableCell>
+                <TableCell>{t('files.columns.size')}</TableCell>
+                <TableCell>{t('files.columns.modified')}</TableCell>
+                <TableCell align="right">Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
               {files.map((file) => (
-                <tr key={file.id} style={{ borderBottom: '1px solid #2a2a2a' }}>
-                  <td style={{ padding: '1rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <span>{file.type === 'folder' ? '📁' : '📄'}</span>
-                      <span>{file.name}</span>
-                    </div>
-                  </td>
-                  <td style={{ padding: '1rem', color: '#888' }}>{formatFileSize(file.size)}</td>
-                  <td style={{ padding: '1rem', color: '#888' }}>
+                <TableRow key={file.id} hover>
+                  <TableCell>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      {file.type === 'folder' ? (
+                        <FolderIcon color="primary" />
+                      ) : (
+                        <InsertDriveFileIcon color="action" />
+                      )}
+                      <Typography>{file.name}</Typography>
+                    </Box>
+                  </TableCell>
+                  <TableCell>{formatFileSize(file.size)}</TableCell>
+                  <TableCell>
                     {new Date(file.created_at).toLocaleDateString()}
-                  </td>
-                  <td style={{ padding: '1rem', textAlign: 'right' }}>
-                    <button style={{
-                      padding: '0.5rem 1rem',
-                      background: '#333',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      fontSize: '0.9rem',
-                    }}>
-                      Download
-                    </button>
-                  </td>
-                </tr>
+                  </TableCell>
+                  <TableCell align="right">
+                    <IconButton size="small" disabled>
+                      <DownloadIcon />
+                    </IconButton>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
-      </div>
-    </div>
+      </TableContainer>
+    </Box>
   )
 }
