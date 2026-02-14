@@ -1,0 +1,87 @@
+# Environment files (NEVER commit these - they contain secrets)
+.env
+.env.development
+.env.production
+.env.local
+.env.*.local
+
+# Secrets directory
+secrets/
+*.key
+*.pem
+*.crt
+
+# Storage and data
+storage/
+logs/
+*.log
+
+# Docker volumes
+postgres_data/
+redis_data/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.pnpm-store/
+
+# Rust
+target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# Build outputs
+dist/
+dist-ssr/
+*.local
+build/
+
+# IDE and editors
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-workspace
+*.sublime-project
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Testing
+coverage/
+*.coveragerc
+.nyc_output/
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Certificates (if generated locally)
+*.cert
+*.ca
+*.p12
+*.pfx
+
+# Database dumps
+*.sql
+*.db
+*.sqlite
+*.sqlite3
+
+# Backup files
+*.bak
+*.backup
+*~

@@ -1,0 +1,1 @@
+// HTTP Adapter module placeholder

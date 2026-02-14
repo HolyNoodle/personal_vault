@@ -1,0 +1,99 @@
+version: '3.9'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: sandbox-postgres-dev
+    environment:
+      POSTGRES_DB: sandbox_dev
+      POSTGRES_USER: sandbox_user
+      POSTGRES_PASSWORD: sandbox_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sandbox_user -d sandbox_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis (for WebAuthn challenges)
+  redis:
+    image: redis:7-alpine
+    container_name: sandbox-redis-dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Mailhog (Email testing)
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: sandbox-mailhog-dev
+    ports:
+      - "1025:1025"  # SMTP
+      - "8025:8025"  # Web UI
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8025"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Rust Backend (Development)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: sandbox-backend-dev
+    environment:
+      - DATABASE_URL=postgresql://sandbox_user:sandbox_dev_password@postgres:5432/sandbox_dev
+      - REDIS_URL=redis://redis:6379
+      - RUST_LOG=debug
+      - WEBAUTHN_RP_ID=localhost
+      - WEBAUTHN_ORIGIN=http://localhost:5173
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./backend:/app
+      - ./storage:/data/storage
+      - cargo_cache:/usr/local/cargo/registry
+      - target_cache:/app/target
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: cargo watch -x run
+
+  # Frontend (Development)
+  frontend:
+    build:
+      context: ./frontend/web
+      dockerfile: Dockerfile.dev
+    container_name: sandbox-frontend-dev
+    environment:
+      - VITE_API_URL=http://localhost:8080
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/web:/app
+      - /app/node_modules
+    command: npm run dev -- --host 0.0.0.0
+
+volumes:
+  postgres_data:
+  redis_data:
+  cargo_cache:
+  target_cache:
+
+networks:
+  default:
+    name: sandbox-dev-network

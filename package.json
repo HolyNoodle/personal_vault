@@ -1,0 +1,69 @@
+{
+  "name": "secure-sandbox-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Secure file sandbox server with WebRTC streaming and Landlock LSM",
+  "workspaces": [
+    "frontend/web"
+  ],
+  "scripts": {
+    "predev": "node scripts/setup-env.js development",
+    "dev": "docker-compose -f docker-compose.dev.yml up",
+    "dev:build": "docker-compose -f docker-compose.dev.yml up --build",
+    "dev:detach": "docker-compose -f docker-compose.dev.yml up -d",
+    "dev:stop": "docker-compose -f docker-compose.dev.yml down",
+    "dev:clean": "docker-compose -f docker-compose.dev.yml down -v",
+    "dev:logs": "docker-compose -f docker-compose.dev.yml logs -f",
+    "dev:logs:backend": "docker-compose -f docker-compose.dev.yml logs -f backend",
+    "dev:logs:frontend": "docker-compose -f docker-compose.dev.yml logs -f frontend",
+    
+    "preprod": "node scripts/setup-env.js production",
+    "prod": "docker-compose -f docker-compose.prod.yml up -d",
+    "prod:build": "docker-compose -f docker-compose.prod.yml up --build -d",
+    "prod:stop": "docker-compose -f docker-compose.prod.yml down",
+    "prod:logs": "docker-compose -f docker-compose.prod.yml logs -f",
+    "prod:logs:backend": "docker-compose -f docker-compose.prod.yml logs -f backend",
+    
+    "db:migrate": "docker exec -it sandbox-backend-dev cargo sqlx migrate run",
+    "db:migrate:prod": "docker exec -it sandbox-backend-prod cargo sqlx migrate run",
+    "db:reset": "docker-compose -f docker-compose.dev.yml down -v postgres && npm run dev:detach",
+    
+    "secrets:generate": "node scripts/generate-secrets.js",
+    
+    "backend:build": "cd backend && cargo build",
+    "backend:test": "cd backend && cargo test",
+    "backend:fmt": "cd backend && cargo fmt",
+    "backend:lint": "cd backend && cargo clippy",
+    
+    "frontend:build": "cd frontend/web && npm run build",
+    "frontend:test": "cd frontend/web && npm test",
+    "frontend:lint": "cd frontend/web && npm run lint",
+    
+    "build": "npm run backend:build && npm run frontend:build",
+    "test": "npm run backend:test && npm run frontend:test",
+    "lint": "npm run backend:lint && npm run frontend:lint",
+    "format": "npm run backend:fmt",
+    
+    "health": "curl -f http://localhost:8080/health || exit 1",
+    
+    "setup": "npm install && cd frontend/web && npm install",
+    "postinstall": "echo '✅ Dependencies installed. Run npm run dev to start.'"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "keywords": [
+    "rust",
+    "webrtc",
+    "landlock",
+    "sandbox",
+    "security",
+    "monorepo"
+  ],
+  "author": "Sandbox Team",
+  "license": "MIT"
+}
