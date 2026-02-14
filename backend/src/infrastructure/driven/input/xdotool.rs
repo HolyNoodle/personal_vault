@@ -1,9 +1,8 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use tokio::process::Command;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, error};
 
 /// Manages input forwarding to X11 displays using xdotool
 pub struct XdotoolInputManager {
@@ -34,19 +33,19 @@ impl XdotoolInputManager {
         };
 
         if let Some(display) = display {
-            let output = Command::new("xdotool")
-                .arg("mousemove")
-                .arg("--sync")
-                .arg(x.to_string())
-                .arg(y.to_string())
-                .env("DISPLAY", &display)
-                .output()
-                .await
-                .context("Failed to execute xdotool mousemove")?;
-
-            if !output.status.success() {
-                error!("xdotool mousemove failed: {}", String::from_utf8_lossy(&output.stderr));
-            }
+            // Spawn without waiting for completion to avoid blocking
+            tokio::spawn(async move {
+                let _ = Command::new("xdotool")
+                    .arg("mousemove")
+                    .arg("--sync")
+                    .arg(x.to_string())
+                    .arg(y.to_string())
+                    .env("DISPLAY", &display)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+            });
         }
         Ok(())
     }
@@ -58,17 +57,16 @@ impl XdotoolInputManager {
         };
 
         if let Some(display) = display {
-            let output = Command::new("xdotool")
-                .arg("mousedown")
-                .arg(button.to_string())
-                .env("DISPLAY", &display)
-                .output()
-                .await
-                .context("Failed to execute xdotool mousedown")?;
-
-            if !output.status.success() {
-                error!("xdotool mousedown failed: {}", String::from_utf8_lossy(&output.stderr));
-            }
+            tokio::spawn(async move {
+                let _ = Command::new("xdotool")
+                    .arg("mousedown")
+                    .arg(button.to_string())
+                    .env("DISPLAY", &display)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+            });
         }
         Ok(())
     }
@@ -80,17 +78,16 @@ impl XdotoolInputManager {
         };
 
         if let Some(display) = display {
-            let output = Command::new("xdotool")
-                .arg("mouseup")
-                .arg(button.to_string())
-                .env("DISPLAY", &display)
-                .output()
-                .await
-                .context("Failed to execute xdotool mouseup")?;
-
-            if !output.status.success() {
-                error!("xdotool mouseup failed: {}", String::from_utf8_lossy(&output.stderr));
-            }
+            tokio::spawn(async move {
+                let _ = Command::new("xdotool")
+                    .arg("mouseup")
+                    .arg(button.to_string())
+                    .env("DISPLAY", &display)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+            });
         }
         Ok(())
     }
@@ -103,17 +100,16 @@ impl XdotoolInputManager {
 
         if let Some(display) = display {
             let xdotool_key = map_key_to_xdotool(key);
-            let output = Command::new("xdotool")
-                .arg("keydown")
-                .arg(&xdotool_key)
-                .env("DISPLAY", &display)
-                .output()
-                .await
-                .context("Failed to execute xdotool keydown")?;
-
-            if !output.status.success() {
-                debug!("xdotool keydown {} failed: {}", xdotool_key, String::from_utf8_lossy(&output.stderr));
-            }
+            tokio::spawn(async move {
+                let _ = Command::new("xdotool")
+                    .arg("keydown")
+                    .arg(&xdotool_key)
+                    .env("DISPLAY", &display)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+            });
         }
         Ok(())
     }
@@ -126,17 +122,16 @@ impl XdotoolInputManager {
 
         if let Some(display) = display {
             let xdotool_key = map_key_to_xdotool(key);
-            let output = Command::new("xdotool")
-                .arg("keyup")
-                .arg(&xdotool_key)
-                .env("DISPLAY", &display)
-                .output()
-                .await
-                .context("Failed to execute xdotool keyup")?;
-
-            if !output.status.success() {
-                debug!("xdotool keyup {} failed: {}", xdotool_key, String::from_utf8_lossy(&output.stderr));
-            }
+            tokio::spawn(async move {
+                let _ = Command::new("xdotool")
+                    .arg("keyup")
+                    .arg(&xdotool_key)
+                    .env("DISPLAY", &display)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+            });
         }
         Ok(())
     }

@@ -16,6 +16,10 @@ RUN apt-get update && apt-get install -y \
     wmctrl \
     openbox \
     xdotool \
+    libxcb1-dev \
+    libxcb-render0-dev \
+    libxcb-shape0-dev \
+    libxcb-xfixes0-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install cargo-watch for hot-reloading

@@ -214,7 +214,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       }
     }
 
+    // Throttle mouse move to max 30 events per second
+    let lastMouseMove = 0
     const handleMouseMove = (e: MouseEvent) => {
+      const now = Date.now()
+      if (now - lastMouseMove < 33) return // ~30fps
+      lastMouseMove = now
+      
       const rect = container.getBoundingClientRect()
       const x = Math.round((e.clientX - rect.left) / rect.width * 1920)
       const y = Math.round((e.clientY - rect.top) / rect.height * 1080)
@@ -222,11 +228,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
 
     const handleMouseDown = (e: MouseEvent) => {
+      e.preventDefault()
       const button = e.button === 0 ? 1 : e.button === 2 ? 3 : 2
       sendInput({ type: 'mouse-down', button })
     }
 
     const handleMouseUp = (e: MouseEvent) => {
+      e.preventDefault()
       const button = e.button === 0 ? 1 : e.button === 2 ? 3 : 2
       sendInput({ type: 'mouse-up', button })
     }

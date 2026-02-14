@@ -78,6 +78,9 @@ lettre = "0.11"
 # Landlock LSM
 landlock = "0.3"
 
+# X11 for input injection
+x11rb = { version = "0.13", features = ["allow-unsafe-code", "xtest"] }
+
 [dev-dependencies]
 # Testing
 testcontainers = "0.15"

@@ -32,7 +32,7 @@ use webrtc::{
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 use std::collections::HashMap;
-use crate::infrastructure::driven::input::xdotool::XdotoolInputManager;
+use crate::infrastructure::driven::input::x11_input::X11InputManager;
 
 /// Signaling message types
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,7 +56,7 @@ pub struct WebRTCAdapter {
     tracks: Arc<RwLock<HashMap<String, Arc<TrackLocalStaticSample>>>>,
     cancel_tokens: Arc<RwLock<HashMap<String, CancellationToken>>>,
     ffmpeg_handles: Arc<RwLock<HashMap<String, ChildStdout>>>,
-    input_manager: Arc<XdotoolInputManager>,
+    input_manager: Arc<X11InputManager>,
 }
 
 impl WebRTCAdapter {
@@ -66,7 +66,7 @@ impl WebRTCAdapter {
             tracks: Arc::new(RwLock::new(HashMap::new())),
             cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
             ffmpeg_handles: Arc::new(RwLock::new(HashMap::new())),
-            input_manager: Arc::new(XdotoolInputManager::new()),
+            input_manager: Arc::new(X11InputManager::new()),
         }
     }
     
@@ -370,22 +370,27 @@ async fn handle_signaling_message(
             Ok(None)
         }
         SignalingMessage::MouseMove { x, y } => {
+            debug!("Received MouseMove: x={}, y={}", x, y);
             let _ = adapter.input_manager.handle_mouse_move(session_id, x, y).await;
             Ok(None)
         }
         SignalingMessage::MouseDown { button } => {
+            info!("Received MouseDown: button={}", button);
             let _ = adapter.input_manager.handle_mouse_down(session_id, button).await;
             Ok(None)
         }
         SignalingMessage::MouseUp { button } => {
+            info!("Received MouseUp: button={}", button);
             let _ = adapter.input_manager.handle_mouse_up(session_id, button).await;
             Ok(None)
         }
         SignalingMessage::KeyDown { key, .. } => {
+            info!("Received KeyDown: key={}", key);
             let _ = adapter.input_manager.handle_key_down(session_id, &key).await;
             Ok(None)
         }
         SignalingMessage::KeyUp { key, .. } => {
+            info!("Received KeyUp: key={}", key);
             let _ = adapter.input_manager.handle_key_up(session_id, &key).await;
             Ok(None)
         }

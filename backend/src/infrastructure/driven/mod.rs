@@ -6,4 +6,4 @@ pub mod input;
 pub use persistence::*;
 pub use sandbox::{XvfbManager, FfmpegManager};
 pub use application_launcher::*;
-pub use input::xdotool::XdotoolInputManager;
+pub use input::x11_input::X11InputManager;

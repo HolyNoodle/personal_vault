@@ -67,6 +67,8 @@ impl XvfbManager {
             .arg("-ac") // Disable access control
             .arg("+extension")
             .arg("GLX")
+            .arg("+extension")
+            .arg("XTEST") // Enable XTEST for input injection
             .arg("+render")
             .arg("-noreset")
             .stdout(Stdio::null())
