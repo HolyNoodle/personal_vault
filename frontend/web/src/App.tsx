@@ -1,33 +1,61 @@
+import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Layout } from './components/Layout'
 import { LoginPage } from './pages/LoginPage'
 import { FilesPage } from './pages/FilesPage'
 import { SessionsPage } from './pages/SessionsPage'
+import SetupPage from './pages/SetupPage'
 import { useAuthStore } from './store/authStore'
 
-function App() {
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuthStore()
+  
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />
+  }
+  
+  return <Layout>{children}</Layout>
+}
+
+function App() {
+  const [isInitialized, setIsInitialized] = useState<boolean | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    checkSetupStatus();
+  }, []);
+
+  const checkSetupStatus = async () => {
+    try {
+      const response = await fetch('http://localhost:8080/api/setup/status');
+      const data = await response.json();
+      setIsInitialized(data.initialized);
+    } catch (error) {
+      console.error('Failed to check setup status:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <p>Loading...</p>
+      </div>
+    );
+  }
+
+  if (isInitialized === false) {
+    return <SetupPage onSetupComplete={() => setIsInitialized(true)} />;
+  }
 
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route
-          path="/"
-          element={
-            isAuthenticated ? (
-              <Layout>
-                <Routes>
-                  <Route path="/files" element={<FilesPage />} />
-                  <Route path="/sessions" element={<SessionsPage />} />
-                  <Route path="/" element={<Navigate to="/files" replace />} />
-                </Routes>
-              </Layout>
-            ) : (
-              <Navigate to="/login" replace />
-            )
-          }
-        />
+        <Route path="/files" element={<ProtectedRoute><FilesPage /></ProtectedRoute>} />
+        <Route path="/sessions" element={<ProtectedRoute><SessionsPage /></ProtectedRoute>} />
+        <Route path="/" element={<Navigate to="/files" replace />} />
       </Routes>
     </BrowserRouter>
   )

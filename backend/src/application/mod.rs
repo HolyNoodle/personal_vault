@@ -1,4 +1,3 @@
-```rust
 // Application layer - use cases organized by persona
 // Orchestrates domain logic, depends on domain layer only
 
@@ -8,5 +7,3 @@ pub mod client;
 
 pub mod services;
 pub mod ports;
-
-```

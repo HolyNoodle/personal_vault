@@ -18,7 +18,7 @@ mkdir -p storage logs
 
 # Start services
 echo "Starting Docker services..."
-docker-compose -f docker-compose.dev.yml up -d
+docker compose -f docker-compose.dev.yml up -d
 
 echo ""
 echo "⏳ Waiting for services to be healthy..."
@@ -42,8 +42,8 @@ echo "  📮 Redis:          localhost:6379"
 echo "  📧 Mailhog UI:     http://localhost:8025"
 echo ""
 echo "Logs:"
-echo "  docker-compose -f docker-compose.dev.yml logs -f backend"
-echo "  docker-compose -f docker-compose.dev.yml logs -f frontend"
+echo "  docker compose -f docker-compose.dev.yml logs -f backend"
+echo "  docker compose -f docker-compose.dev.yml logs -f frontend"
 echo ""
 echo "Stop:"
 echo "  ./scripts/dev-stop.sh"

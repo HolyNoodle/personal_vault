@@ -1,5 +1,5 @@
 # Development Dockerfile with hot-reloading
-FROM rust:1.75-slim
+FROM rust:1.93-slim
 
 WORKDIR /app
 
@@ -14,13 +14,14 @@ RUN apt-get update && apt-get install -y \
 RUN cargo install cargo-watch
 
 # Copy manifests
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml ./
+COPY Cargo.lock* ./
 
-# Create dummy main to cache dependencies
-RUN mkdir src && \
-    echo "fn main() {}" > src/main.rs && \
-    cargo build && \
-    rm -rf src
+# Create dummy main to cache dependencies (skip if project is minimal)
+# RUN mkdir src && \
+#     echo "fn main() {}" > src/main.rs && \
+#     cargo build && \
+#     rm -rf src
 
 # Copy source code
 COPY . .
