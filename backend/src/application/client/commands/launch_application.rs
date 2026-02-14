@@ -32,6 +32,9 @@ pub struct ApplicationLauncherService {
     session_repository: Arc<dyn ApplicationSessionRepository>,
     launcher: Arc<dyn ApplicationLauncherPort>,
     sandbox_isolation: Arc<dyn SandboxIsolationPort>,
+    // Video session handler for actual streaming
+    create_session_handler: Arc<crate::application::client::commands::CreateSessionHandler>,
+    webrtc_adapter: Arc<crate::infrastructure::driving::WebRTCAdapter>,
 }
 
 impl ApplicationLauncherService {
@@ -39,11 +42,15 @@ impl ApplicationLauncherService {
         session_repository: Arc<dyn ApplicationSessionRepository>,
         launcher: Arc<dyn ApplicationLauncherPort>,
         sandbox_isolation: Arc<dyn SandboxIsolationPort>,
+        create_session_handler: Arc<crate::application::client::commands::CreateSessionHandler>,
+        webrtc_adapter: Arc<crate::infrastructure::driving::WebRTCAdapter>,
     ) -> Self {
         Self {
             session_repository,
             launcher,
             sandbox_isolation,
+            create_session_handler,
+            webrtc_adapter,
         }
     }
 
@@ -105,10 +112,27 @@ impl ApplicationLauncherService {
         session.mark_ready();
         self.session_repository.save(&session).await?;
 
-        // Return WebRTC offer
+        // Create video session for streaming the application
+        let video_command = crate::application::client::commands::CreateSessionCommand {
+            user_id: session.user_id.clone(),
+            config: crate::domain::aggregates::VideoConfig {
+                width: command.video_width,
+                height: command.video_height,
+                framerate: command.video_framerate,
+                codec: crate::domain::aggregates::VideoCodec::H264,
+            },
+            application: "thunar".to_string(), // File manager for file explorer
+        };
+        
+        let video_result = self.create_session_handler.handle(
+            video_command,
+            Arc::clone(&self.webrtc_adapter),
+        ).await?;
+
+        // Return session info
         Ok(LaunchApplicationResponse {
-            session_id: session.id.to_string(),
-            webrtc_offer: "sdp-offer-placeholder".to_string(),
+            session_id: video_result.session_id,
+            webrtc_offer: video_result.websocket_url,
         })
     }
 

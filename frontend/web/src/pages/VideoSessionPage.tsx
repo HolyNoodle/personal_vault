@@ -1,4 +1,5 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Container,
   Paper,
@@ -17,7 +18,10 @@ import { WebRTCService } from '../services/webrtc'
 import { useAuthStore } from '../store/authStore'
 
 export const VideoSessionPage: React.FC = () => {
-  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [searchParams] = useSearchParams()
+  const launchedSessionId = searchParams.get('sessionId')
+  
+  const [sessionId, setSessionId] = useState<string | null>(launchedSessionId)
   const [websocketUrl, setWebsocketUrl] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -25,6 +29,15 @@ export const VideoSessionPage: React.FC = () => {
   const { user } = useAuthStore()
 
   const webrtcService = new WebRTCService()
+
+  // If we have a session ID from the launch page, set up the WebSocket URL
+  useEffect(() => {
+    if (launchedSessionId && !websocketUrl) {
+      // For launched applications, we use the WebSocket URL directly
+      // The WebRTC offer is already handled by the backend
+      setWebsocketUrl(`ws://localhost:8080/ws?session=${launchedSessionId}`)
+    }
+  }, [launchedSessionId, websocketUrl])
 
   const handleStartSession = async () => {
     if (!user?.id) {

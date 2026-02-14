@@ -11,6 +11,10 @@ RUN apt-get update && apt-get install -y \
     xvfb \
     ffmpeg \
     xterm \
+    thunar \
+    dbus-x11 \
+    wmctrl \
+    openbox \
     && rm -rf /var/lib/apt/lists/*
 
 # Install cargo-watch for hot-reloading

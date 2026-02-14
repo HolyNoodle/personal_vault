@@ -43,6 +43,13 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
     postgresql-client \
+    xvfb \
+    ffmpeg \
+    xterm \
+    thunar \
+    dbus-x11 \
+    wmctrl \
+    openbox \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app user

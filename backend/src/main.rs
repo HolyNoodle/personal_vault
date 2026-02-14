@@ -100,25 +100,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         streaming.clone(),
     ));
     
+    // Initialize driving adapters (needed by application platform)
+    let webrtc_adapter = Arc::new(WebRTCAdapter::new());
+    
     // Initialize APPLICATION PLATFORM infrastructure
     let app_session_repo = Arc::new(InMemorySessionRepository::new());
     let app_launcher = Arc::new(MockApplicationLauncher);
     let sandbox_isolation = Arc::new(infrastructure::driven::sandbox::isolation::MockSandboxIsolation);
     
-    // Initialize application launcher service
+    // Initialize application launcher service with video session infrastructure
     let launcher_service = Arc::new(ApplicationLauncherService::new(
         app_session_repo.clone(),
         app_launcher.clone(),
         sandbox_isolation.clone(),
+        create_session_handler.clone(),
+        webrtc_adapter.clone(),
     ));
     
     // Create application handler state
     let app_handler_state = AppHandlerState {
         launcher_service: Arc::clone(&launcher_service),
     };
-    
-    // Initialize driving adapters
-    let webrtc_adapter = Arc::new(WebRTCAdapter::new());
     
     // Create API state
     let api_state = Arc::new(ApiState {
