@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use crate::domain::aggregates::{VideoSession, VideoSessionId, VideoConfig};
 use crate::infrastructure::driven::{InMemoryVideoSessionRepository, XvfbManager, FfmpegManager};
+use crate::infrastructure::driving::WebRTCAdapter;
 use crate::application::ports::{VideoSessionRepository, SandboxPort, VideoStreamingPort};
 
 /// Command to create a new video session
@@ -39,7 +40,7 @@ impl CreateSessionHandler {
         }
     }
 
-    pub async fn handle(&self, command: CreateSessionCommand) -> Result<CreateSessionResult> {
+    pub async fn handle(&self, command: CreateSessionCommand, webrtc_adapter: Arc<WebRTCAdapter>) -> Result<CreateSessionResult> {
         // Validate config
         command.config.validate()
             .map_err(|e| anyhow::anyhow!("Invalid video config: {}", e))?;
@@ -57,8 +58,11 @@ impl CreateSessionHandler {
         // Launch demo application (for POC: xterm)
         self.sandbox.launch_application(&session.id, &display, "xterm").await?;
 
-        // Start video streaming
-        self.streaming.start_session(&session.id, &display).await?;
+        // Start video streaming and get FFmpeg stdout
+        let ffmpeg_stdout = self.streaming.start_session(&session.id, &display).await?;
+        
+        // Store FFmpeg stdout in WebRTC adapter
+        webrtc_adapter.set_ffmpeg_stream(session.id.to_string(), ffmpeg_stdout).await;
 
         // Mark session as ready
         session.mark_ready();

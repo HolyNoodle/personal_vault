@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tokio::process::{Command as TokioCommand, ChildStdout};
 use std::collections::HashMap;
 use tracing::{error, info};
 
@@ -14,7 +15,8 @@ pub struct FfmpegManager {
 }
 
 struct FfmpegEncoder {
-    process: Option<Child>,
+    process: Option<tokio::process::Child>,
+    stdout: Option<ChildStdout>,
 }
 
 impl FfmpegManager {
@@ -31,18 +33,16 @@ impl FfmpegManager {
         width: u16,
         height: u16,
         framerate: u8,
-    ) -> Result<()> {
+    ) -> Result<ChildStdout> {
         info!(
             "Starting FFmpeg encoder for session {} on display {} ({}x{}@{}fps)",
             session_id, display_str, width, height, framerate
         );
 
         let resolution = format!("{}x{}", width, height);
-        let output_path = format!("/tmp/session_{}.h264", session_id);
 
-        // For POC: Output to file
-        // In production: This would pipe to WebRTC track
-        let child = Command::new("ffmpeg")
+        // Output H.264 to stdout for WebRTC streaming
+        let mut child = TokioCommand::new("ffmpeg")
             .arg("-f")
             .arg("x11grab")
             .arg("-video_size")
@@ -52,34 +52,39 @@ impl FfmpegManager {
             .arg("-i")
             .arg(display_str)
             .arg("-c:v")
-            .arg("libx264")
-            .arg("-preset")
-            .arg("ultrafast")
-            .arg("-tune")
-            .arg("zerolatency")
+            .arg("libvpx")
+            .arg("-b:v")
+            .arg("1M")
+            .arg("-deadline")
+            .arg("realtime")
+            .arg("-cpu-used")
+            .arg("8")
             .arg("-pix_fmt")
             .arg("yuv420p")
             .arg("-g")
             .arg("60")
             .arg("-f")
-            .arg("h264")
-            .arg("-y") // Overwrite output file
-            .arg(&output_path)
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
+            .arg("ivf")
+            .arg("pipe:1")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
             .spawn()
             .context("Failed to start FFmpeg. Make sure FFmpeg is installed.")?;
 
-        info!("FFmpeg encoder started for session {}, output: {}", session_id, output_path);
+        let stdout = child.stdout.take()
+            .context("Failed to capture FFmpeg stdout")?;
+
+        info!("FFmpeg encoder started for session {}, streaming to WebRTC", session_id);
 
         let encoder = FfmpegEncoder {
             process: Some(child),
+            stdout: None,  // We return the stdout, don't store it
         };
 
         let mut encoders = self.encoders.write().await;
         encoders.insert(session_id.to_string(), encoder);
 
-        Ok(())
+        Ok(stdout)
     }
 
     async fn stop_encoder(&self, session_id: &str) -> Result<()> {
@@ -87,10 +92,10 @@ impl FfmpegManager {
         if let Some(mut encoder) = encoders.remove(session_id) {
             info!("Stopping FFmpeg encoder for session {}", session_id);
             if let Some(mut child) = encoder.process.take() {
-                if let Err(e) = child.kill() {
+                if let Err(e) = child.kill().await {
                     error!("Failed to kill FFmpeg process: {}", e);
                 }
-                let _ = child.wait();
+                let _ = child.wait().await;
             }
         }
         Ok(())
@@ -111,7 +116,7 @@ impl FfmpegManager {
 }
 
 impl VideoStreamingPort for FfmpegManager {
-    async fn start_session(&self, session_id: &VideoSessionId, display: &str) -> Result<()> {
+    async fn start_session(&self, session_id: &VideoSessionId, display: &str) -> Result<ChildStdout> {
         // Default: 1920x1080@30fps
         // These would come from VideoConfig in production
         self.start_encoder(session_id.as_str(), display, 1920, 1080, 30).await

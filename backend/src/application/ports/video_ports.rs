@@ -1,5 +1,6 @@
 use anyhow::Result;
 use crate::domain::aggregates::{VideoSession, VideoSessionId};
+use tokio::process::ChildStdout;
 
 /// Port for video session repository
 pub trait VideoSessionRepository: Send + Sync {
@@ -11,7 +12,7 @@ pub trait VideoSessionRepository: Send + Sync {
 
 /// Port for video streaming service (implemented by infrastructure)
 pub trait VideoStreamingPort: Send + Sync {
-    async fn start_session(&self, session_id: &VideoSessionId, display: &str) -> Result<()>;
+    async fn start_session(&self, session_id: &VideoSessionId, display: &str) -> Result<ChildStdout>;
     async fn stop_session(&self, session_id: &VideoSessionId) -> Result<()>;
     async fn is_running(&self, session_id: &VideoSessionId) -> Result<bool>;
 }

@@ -11,6 +11,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
+use tokio::io::AsyncReadExt;
+use tokio::process::ChildStdout;
+use bytes::BufMut;
 use webrtc::{
     api::{
         media_engine::MediaEngine,
@@ -24,7 +27,7 @@ use webrtc::{
         RTCPeerConnection,
     },
     rtp_transceiver::rtp_codec::RTCRtpCodecCapability,
-    track::track_local::{track_local_static_rtp::TrackLocalStaticRTP, TrackLocal, TrackLocalWriter},
+    track::track_local::{track_local_static_sample::TrackLocalStaticSample, TrackLocal},
 };
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
@@ -44,8 +47,9 @@ pub enum SignalingMessage {
 /// WebRTC session manager (adapter for WebRTC)
 pub struct WebRTCAdapter {
     peers: Arc<RwLock<HashMap<String, Arc<RTCPeerConnection>>>>,
-    tracks: Arc<RwLock<HashMap<String, Arc<TrackLocalStaticRTP>>>>,
+    tracks: Arc<RwLock<HashMap<String, Arc<TrackLocalStaticSample>>>>,
     cancel_tokens: Arc<RwLock<HashMap<String, CancellationToken>>>,
+    ffmpeg_handles: Arc<RwLock<HashMap<String, ChildStdout>>>,
 }
 
 impl WebRTCAdapter {
@@ -54,21 +58,22 @@ impl WebRTCAdapter {
             peers: Arc::new(RwLock::new(HashMap::new())),
             tracks: Arc::new(RwLock::new(HashMap::new())),
             cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
+            ffmpeg_handles: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    async fn create_peer_connection(&self, session_id: &str) -> Result<(Arc<RTCPeerConnection>, Arc<TrackLocalStaticRTP>)> {
+    async fn create_peer_connection(&self, session_id: &str) -> Result<(Arc<RTCPeerConnection>, Arc<TrackLocalStaticSample>)> {
         // Create media engine
         let mut media_engine = MediaEngine::default();
         
-        // Register H.264 codec
+        // Register VP8 codec (mandatory WebRTC codec, natively supported in all browsers)
         media_engine.register_codec(
             webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecParameters {
                 capability: RTCRtpCodecCapability {
-                    mime_type: "video/H264".to_owned(),
+                    mime_type: "video/VP8".to_owned(),
                     clock_rate: 90000,
                     channels: 0,
-                    sdp_fmtp_line: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f".to_owned(),
+                    sdp_fmtp_line: "".to_owned(),
                     rtcp_feedback: vec![],
                 },
                 payload_type: 96,
@@ -95,9 +100,9 @@ impl WebRTCAdapter {
         let peer_connection = Arc::new(api.new_peer_connection(config).await?);
         
         // Create video track
-        let video_track = Arc::new(TrackLocalStaticRTP::new(
+        let video_track = Arc::new(TrackLocalStaticSample::new(
             RTCRtpCodecCapability {
-                mime_type: "video/H264".to_owned(),
+                mime_type: "video/VP8".to_owned(),
                 clock_rate: 90000,
                 channels: 0,
                 sdp_fmtp_line: "".to_owned(),
@@ -116,9 +121,23 @@ impl WebRTCAdapter {
         let cancel_token = CancellationToken::new();
         let track_clone = Arc::clone(&video_track);
         let token_clone = cancel_token.clone();
+        let session_id_string = session_id.to_string();
+        let ffmpeg_handles_clone = Arc::clone(&self.ffmpeg_handles);
+        
         tokio::spawn(async move {
-            if let Err(e) = send_test_pattern(track_clone, token_clone).await {
-                error!("Frame sender error: {}", e);
+            // Wait for FFmpeg stdout to be available
+            let ffmpeg_stdout = loop {
+                let mut handles = ffmpeg_handles_clone.write().await;
+                if let Some(stdout) = handles.remove(&session_id_string) {
+                    break stdout;
+                }
+                drop(handles);
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            };
+            
+            info!("Starting VP8 stream for session: {}", session_id_string);
+            if let Err(e) = stream_vp8_to_track(ffmpeg_stdout, track_clone, token_clone).await {
+                error!("VP8 streaming error: {}", e);
             }
         });
         
@@ -204,6 +223,12 @@ impl WebRTCAdapter {
         
         Ok(())
     }
+    
+    /// Store FFmpeg stdout handle and start streaming when peer connects
+    pub async fn set_ffmpeg_stream(&self, session_id: String, ffmpeg_stdout: ChildStdout) {
+        let mut handles = self.ffmpeg_handles.write().await;
+        handles.insert(session_id, ffmpeg_stdout);
+    }
 
     pub async fn cleanup(&self, session_id: &str) -> Result<()> {
         info!("Cleaning up WebRTC resources for session: {}", session_id);
@@ -215,6 +240,11 @@ impl WebRTCAdapter {
             info!("Cancelled frame sender for session: {}", session_id);
         }
         drop(tokens); // Release lock before cleanup
+        
+        // Remove FFmpeg handle
+        let mut handles = self.ffmpeg_handles.write().await;
+        handles.remove(session_id);
+        drop(handles);
         
         let mut peers = self.peers.write().await;
         let mut tracks = self.tracks.write().await;
@@ -232,18 +262,20 @@ impl WebRTCAdapter {
 /// WebSocket handler for signaling
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
     State(adapter): State<Arc<WebRTCAdapter>>,
 ) -> impl axum::response::IntoResponse {
-    ws.on_upgrade(|socket| handle_socket(socket, adapter))
+    let session_id = params.get("session").cloned().unwrap_or_else(|| Uuid::new_v4().to_string());
+    ws.on_upgrade(move |socket| handle_socket(socket, adapter, session_id))
 }
 
 pub async fn handle_socket_internal(socket: WebSocket, adapter: Arc<WebRTCAdapter>) {
-    handle_socket(socket, adapter).await
+    let session_id = Uuid::new_v4().to_string();
+    handle_socket(socket, adapter, session_id).await
 }
 
-async fn handle_socket(socket: WebSocket, adapter: Arc<WebRTCAdapter>) {
+async fn handle_socket(socket: WebSocket, adapter: Arc<WebRTCAdapter>, session_id: String) {
     let (mut sender, mut receiver): (SplitSink<WebSocket, Message>, SplitStream<WebSocket>) = socket.split();
-    let session_id = Uuid::new_v4().to_string();
     
     info!("WebSocket connection established for session: {}", session_id);
 
@@ -329,71 +361,84 @@ async fn handle_signaling_message(
     }
 }
 
-/// Send test pattern frames to the video track
-async fn send_test_pattern(track: Arc<TrackLocalStaticRTP>, cancel_token: CancellationToken) -> Result<()> {
-    use tokio::time::{interval, Duration};
+/// Send H.264 video from FFmpeg stdout to WebRTC track
+async fn stream_vp8_to_track(
+    mut ffmpeg_stdout: ChildStdout,
+    track: Arc<TrackLocalStaticSample>,
+    cancel_token: CancellationToken,
+) -> Result<()> {
+    info!("Starting VP8 stream from FFmpeg to WebRTC track");
     
-    let mut ticker = interval(Duration::from_millis(33)); // ~30 FPS
-    let mut sequence_number: u16 = 0;
-    let mut timestamp: u32 = 0;
-    let ssrc: u32 = rand::random();
+    let mut frame_count = 0u64;
     
-    info!("Starting test pattern video stream");
+    // Read and skip IVF file header (32 bytes)
+    let mut header = vec![0u8; 32];
+    match ffmpeg_stdout.read_exact(&mut header).await {
+        Ok(_) => {},
+        Err(e) => {
+            error!("Failed to read IVF header: {}", e);
+            return Err(e.into());
+        }
+    }
+    
+    // VP8 samples for duration calculation (90kHz / 30fps = 3000)
+    let samples_per_frame = 3000u32;
     
     loop {
         tokio::select! {
             _ = cancel_token.cancelled() => {
-                info!("Video stream cancelled");
+                info!("Video stream cancelled after {} frames", frame_count);
                 break;
             }
-            _ = ticker.tick() => {}
-        }
-        
-        // Generate a simple colored frame pattern (changes color over time)
-        let frame_count = (timestamp / 3000) % 3; // Change color every ~100 frames
-        let color_byte = match frame_count {
-            0 => 0x80, // Gray
-            1 => 0xA0, // Lighter
-            _ => 0x60, // Darker
-        };
-        
-        // Create a minimal H.264 NAL unit (I-frame header + fake data)
-        let mut nal_data = vec![
-            0x00, 0x00, 0x00, 0x01, // NAL start code
-            0x65, // NAL unit type: IDR slice
-        ];
-        
-        // Add some payload data (pattern based on timestamp)
-        for i in 0..100 {
-            nal_data.push(((color_byte as usize + i) % 256) as u8);
-        }
-        
-        // Create RTP packet manually
-        let mut rtp_data = vec![];
-        
-        // RTP Header (12 bytes minimum)
-        rtp_data.push(0x80); // V=2, P=0, X=0, CC=0
-        rtp_data.push(0xE0); // M=1, PT=96 (H.264)
-        rtp_data.extend_from_slice(&sequence_number.to_be_bytes());
-        rtp_data.extend_from_slice(&timestamp.to_be_bytes());
-        rtp_data.extend_from_slice(&ssrc.to_be_bytes());
-        
-        // Payload
-        rtp_data.extend_from_slice(&nal_data);
-        
-        // Write RTP packet to track
-        if let Err(e) = track.write(&rtp_data).await {
-            warn!("Failed to write RTP packet: {}", e);
-            break;
-        }
-        
-        sequence_number = sequence_number.wrapping_add(1);
-        timestamp = timestamp.wrapping_add(3000); // 90kHz clock / 30 fps
-        
-        if sequence_number % 300 == 0 {
-            debug!("Sent {} frames", sequence_number);
+            read_result = async {
+                // Read IVF frame header (12 bytes: 4 size + 8 timestamp)
+                let mut frame_header = vec![0u8; 12];
+                match ffmpeg_stdout.read_exact(&mut frame_header).await {
+                    Ok(_) => {},
+                    Err(e) => return Err(e),
+                }
+                
+                // Parse frame size (little-endian u32)
+                let frame_size = u32::from_le_bytes([
+                    frame_header[0], frame_header[1], frame_header[2], frame_header[3]
+                ]) as usize;
+                
+                // Read frame data
+                let mut frame_data = vec![0u8; frame_size];
+                ffmpeg_stdout.read_exact(&mut frame_data).await?;
+                
+                Ok::<Vec<u8>, std::io::Error>(frame_data)
+            } => {
+                match read_result {
+                    Ok(frame_data) => {
+                        // Send raw VP8 frame data (webrtc library handles RTP packetization and VP8 payload descriptor)
+                        if let Err(e) = track.write_sample(&webrtc::media::Sample {
+                            data: frame_data.into(),
+                            duration: std::time::Duration::from_millis(33), // ~30fps
+                            ..Default::default()
+                        }).await {
+                            warn!("Failed to send VP8 sample: {}", e);
+                        } else {
+                            frame_count += 1;
+                            
+                            if frame_count % 30 == 0 {
+                                debug!("Streamed {} VP8 frames", frame_count);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                            info!("VP8 stream ended normally after {} frames", frame_count);
+                        } else {
+                            error!("Error reading VP8 frame: {}", e);
+                        }
+                        break;
+                    }
+                }
+            }
         }
     }
     
+    info!("VP8 stream ended after {} frames", frame_count);
     Ok(())
 }

@@ -51,15 +51,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let api_state = Arc::new(ApiState {
         create_session_handler,
         terminate_session_handler,
+        webrtc_adapter: Arc::clone(&webrtc_adapter),
     });
     
     // Build router (hexagonal architecture - driving adapters)
     let webrtc_clone = Arc::clone(&webrtc_adapter);
     let app = Router::new()
-        .route("/ws", get(|ws: WebSocketUpgrade, State(adapter): State<Arc<WebRTCAdapter>>| async move {
-            use infrastructure::driving::webrtc::handle_socket_internal;
-            ws.on_upgrade(move |socket| handle_socket_internal(socket, adapter))
-        }))
+        .route("/ws", get(infrastructure::driving::webrtc::ws_handler))
         .with_state(webrtc_clone)
         .merge(create_poc_router(api_state))
         .layer(

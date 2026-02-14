@@ -8,10 +8,12 @@ use axum::{
 use serde_json::{json, Value};
 use std::sync::Arc;
 use crate::application::client::commands::{CreateSessionCommand, CreateSessionHandler, TerminateSessionCommand, TerminateSessionHandler};
+use crate::infrastructure::driving::WebRTCAdapter;
 
 pub struct ApiState {
     pub create_session_handler: Arc<CreateSessionHandler>,
     pub terminate_session_handler: Arc<TerminateSessionHandler>,
+    pub webrtc_adapter: Arc<WebRTCAdapter>,
 }
 
 pub fn create_video_routes(state: Arc<ApiState>) -> Router {
@@ -31,7 +33,7 @@ async fn create_session(
         config: serde_json::from_value(payload["config"].clone()).unwrap_or_default(),
     };
 
-    match state.create_session_handler.handle(command).await {
+    match state.create_session_handler.handle(command, Arc::clone(&state.webrtc_adapter)).await {
         Ok(result) => Ok(Json(json!(result))),
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
