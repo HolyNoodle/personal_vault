@@ -12,7 +12,7 @@ pub trait VideoSessionRepository: Send + Sync {
 
 /// Port for video streaming service (implemented by infrastructure)
 pub trait VideoStreamingPort: Send + Sync {
-    async fn start_session(&self, session_id: &VideoSessionId, display: &str) -> Result<ChildStdout>;
+    async fn start_session(&self, session_id: &VideoSessionId, display: &str, width: u16, height: u16, framerate: u8) -> Result<ChildStdout>;
     async fn stop_session(&self, session_id: &VideoSessionId) -> Result<()>;
     async fn is_running(&self, session_id: &VideoSessionId) -> Result<bool>;
 }
@@ -20,6 +20,6 @@ pub trait VideoStreamingPort: Send + Sync {
 /// Port for sandbox isolation service
 pub trait SandboxPort: Send + Sync {
     async fn create_display(&self, session_id: &VideoSessionId, width: u16, height: u16) -> Result<String>;
-    async fn launch_application(&self, session_id: &VideoSessionId, display: &str, app: &str) -> Result<()>;
+    async fn launch_application(&self, session_id: &VideoSessionId, display: &str, app: &str, width: u16, height: u16) -> Result<()>;
     async fn cleanup(&self, session_id: &VideoSessionId) -> Result<()>;
 }

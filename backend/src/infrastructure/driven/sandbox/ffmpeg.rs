@@ -116,10 +116,8 @@ impl FfmpegManager {
 }
 
 impl VideoStreamingPort for FfmpegManager {
-    async fn start_session(&self, session_id: &VideoSessionId, display: &str) -> Result<ChildStdout> {
-        // Default: 1920x1080@30fps
-        // These would come from VideoConfig in production
-        self.start_encoder(session_id.as_str(), display, 1920, 1080, 30).await
+    async fn start_session(&self, session_id: &VideoSessionId, display: &str, width: u16, height: u16, framerate: u8) -> Result<ChildStdout> {
+        self.start_encoder(session_id.as_str(), display, width, height, framerate).await
     }
 
     async fn stop_session(&self, session_id: &VideoSessionId) -> Result<()> {

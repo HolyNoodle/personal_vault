@@ -56,10 +56,16 @@ impl CreateSessionHandler {
         ).await?;
 
         // Launch demo application (for POC: xterm)
-        self.sandbox.launch_application(&session.id, &display, "xterm").await?;
+        self.sandbox.launch_application(&session.id, &display, "xterm", command.config.width, command.config.height).await?;
 
         // Start video streaming and get FFmpeg stdout
-        let ffmpeg_stdout = self.streaming.start_session(&session.id, &display).await?;
+        let ffmpeg_stdout = self.streaming.start_session(
+            &session.id,
+            &display,
+            command.config.width,
+            command.config.height,
+            command.config.framerate,
+        ).await?;
         
         // Store FFmpeg stdout in WebRTC adapter
         webrtc_adapter.set_ffmpeg_stream(session.id.to_string(), ffmpeg_stdout).await;

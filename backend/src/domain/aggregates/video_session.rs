@@ -90,7 +90,12 @@ pub struct VideoConfig {
     pub width: u16,
     pub height: u16,
     pub framerate: u8,
+    #[serde(default = "default_codec")]
     pub codec: VideoCodec,
+}
+
+fn default_codec() -> VideoCodec {
+    VideoCodec::VP8
 }
 
 impl Default for VideoConfig {

@@ -81,12 +81,18 @@ impl XvfbManager {
         Ok(())
     }
 
-    async fn launch_app(&self, session_id: &str, display_str: &str, command: &str) -> Result<()> {
-        debug!("Launching {} on display {} for session {}", command, display_str, session_id);
+    async fn launch_app(&self, session_id: &str, display_str: &str, command: &str, width: u16, height: u16) -> Result<()> {
+        debug!("Launching {} on display {} for session {} ({}x{})", command, display_str, session_id, width, height);
 
-        // Launch application with environment
+        // Calculate xterm geometry (columns x rows based on pixel dimensions)
+        // Typical xterm: 1 character ≈ 9 pixels wide, 16 pixels tall
+        let cols = width / 9;
+        let rows = height / 16;
+        let geometry = format!("{}x{}+0+0", cols, rows);
+
+        // Launch application with environment and fullscreen geometry
         let _child = Command::new(command)
-            .args(&["-e", "top"]) // For xterm, show top command
+            .args(&["-geometry", &geometry, "-maximized", "-e", "top"])
             .env("DISPLAY", display_str)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -103,8 +109,8 @@ impl SandboxPort for XvfbManager {
         Ok(display)
     }
 
-    async fn launch_application(&self, session_id: &VideoSessionId, display: &str, app: &str) -> Result<()> {
-        self.launch_app(session_id.as_str(), display, app).await
+    async fn launch_application(&self, session_id: &VideoSessionId, display: &str, app: &str, width: u16, height: u16) -> Result<()> {
+        self.launch_app(session_id.as_str(), display, app, width, height).await
     }
 
     async fn cleanup(&self, session_id: &VideoSessionId) -> Result<()> {
