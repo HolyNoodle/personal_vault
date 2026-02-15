@@ -1,3 +1,4 @@
+use futures_util::future::FutureExt;
 use anyhow::{Context, Result};
 use base64::Engine;
 use eframe::egui;
@@ -31,12 +32,14 @@ struct FileExplorerApp {
     error_message: Option<String>,
     tx: mpsc::UnboundedSender<AppMessage>,
     rx: Arc<Mutex<mpsc::UnboundedReceiver<PlatformMessage>>>,
+    shutdown: Arc<tokio::sync::Notify>,
 }
 
 impl FileExplorerApp {
     fn new(
         tx: mpsc::UnboundedSender<AppMessage>,
         rx: Arc<Mutex<mpsc::UnboundedReceiver<PlatformMessage>>>,
+        shutdown: Arc<tokio::sync::Notify>,
     ) -> Self {
         let mut app = Self {
             current_path: PathBuf::from("/data/storage"),
@@ -46,6 +49,7 @@ impl FileExplorerApp {
             tx,
             rx,
             search_query: String::new(),
+            shutdown,
         };
         app.refresh_directory();
         app
@@ -220,7 +224,11 @@ impl FileExplorerApp {
 }
 
 impl eframe::App for FileExplorerApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Check shutdown signal and close window if triggered
+        if self.shutdown.notified().now_or_never().is_some() {
+            std::process::exit(0);
+        }
         // Process incoming messages from platform
         let mut messages = Vec::new();
         if let Ok(mut rx) = self.rx.try_lock() {
@@ -331,7 +339,14 @@ impl eframe::App for FileExplorerApp {
                                     ui.label("Video preview not supported in native egui. Download to view.");
                                 }
                                 "pdf" => {
-                                    ui.label("PDF preview not supported in native egui. Download to view.");
+                                    ui.label("PDF preview not supported in native egui.");
+                                    if ui.button("Open PDF").clicked() {
+                                        let path = item.path.clone();
+                                        // Launch PDF with system viewer
+                                        let _ = std::process::Command::new("xdg-open")
+                                            .arg(&path)
+                                            .spawn();
+                                    }
                                 }
                                 _ => {
                                     match std::fs::read_to_string(&item.path) {
@@ -362,6 +377,12 @@ impl eframe::App for FileExplorerApp {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
+    // Log parent PID and command-line arguments for diagnosis
+    let pid = std::process::id();
+    let ppid = unsafe { libc::getppid() };
+    let args: Vec<String> = std::env::args().collect();
+    info!("file-explorer startup: pid={}, ppid={}, args={:?}", pid, ppid, args);
+
     info!("Starting file explorer app...");
 
     let socket_path = get_socket_path();
@@ -382,15 +403,18 @@ async fn main() -> Result<()> {
     let (tx_to_app, rx_from_platform) = mpsc::unbounded_channel::<PlatformMessage>();
     let rx_from_platform = Arc::new(Mutex::new(rx_from_platform));
 
-    // Spawn task to read from socket
+    // Spawn task to read from socket and exit app if disconnected
     let tx_to_app_clone = tx_to_app.clone();
+    let shutdown = Arc::new(tokio::sync::Notify::new());
+    let shutdown_clone = shutdown.clone();
     tokio::spawn(async move {
         let mut line = String::new();
         loop {
             line.clear();
             match reader.read_line(&mut line).await {
                 Ok(0) => {
-                    info!("Platform disconnected");
+                    info!("Platform disconnected, shutting down file-explorer.");
+                    shutdown_clone.notify_waiters();
                     break;
                 }
                 Ok(_) => {
@@ -402,6 +426,7 @@ async fn main() -> Result<()> {
                 }
                 Err(e) => {
                     error!("Error reading from socket: {}", e);
+                    shutdown_clone.notify_waiters();
                     break;
                 }
             }
@@ -432,13 +457,18 @@ async fn main() -> Result<()> {
 
     let tx_clone = tx_to_platform.clone();
     let rx_clone = rx_from_platform.clone();
-
-    // Run egui app (this blocks until the window is closed)
-    let _ = eframe::run_native(
+    let shutdown_gui = shutdown.clone();
+    eframe::run_native(
         "File Explorer",
         options,
-        Box::new(move |_cc| Ok(Box::new(FileExplorerApp::new(tx_clone, rx_clone)))),
+        Box::new(move |_cc| Ok(Box::new(FileExplorerApp::new(tx_clone, rx_clone, shutdown_gui))))
     );
-
+    // After GUI closes, check if shutdown was triggered
+    // Check if shutdown was triggered (non-blocking)
+    let shutdown_triggered = shutdown.notified().now_or_never().is_some();
+    if shutdown_triggered {
+        info!("File-explorer exiting due to platform disconnect.");
+        std::process::exit(0);
+    }
     Ok(())
 }

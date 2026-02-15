@@ -142,7 +142,7 @@ async fn complete_login(
 async fn check_setup_status(
     State(state): State<AppState>,
 ) -> Result<Json<SetupStatusResponse>, (StatusCode, String)> {
-    use crate::application::ports::UserRepository;
+    // Removed unused import: UserRepository
     
     // Check if any users exist in the database
     let has_users = state.user_repo.count_users().await

@@ -67,8 +67,8 @@ impl IpcSocketServer {
         let mut reader = BufReader::new(reader);
 
         // Create channels for bidirectional communication
-        let (tx_to_app, mut rx_from_backend) = mpsc::unbounded_channel::<PlatformMessage>();
-        let (tx_to_backend, mut rx_from_app) = mpsc::unbounded_channel::<AppMessage>();
+        let (_tx_to_app, mut rx_from_backend) = mpsc::unbounded_channel::<PlatformMessage>();
+        let (_tx_to_backend, _rx_from_app) = mpsc::unbounded_channel::<AppMessage>();
 
         // Spawn task to send messages to app
         tokio::spawn(async move {
@@ -87,7 +87,7 @@ impl IpcSocketServer {
 
         // Read messages from app
         let mut line = String::new();
-        let mut session_id: Option<String> = None;
+        let session_id: Option<String> = None;
 
         loop {
             line.clear();
@@ -103,14 +103,14 @@ impl IpcSocketServer {
 
                             // Handle message based on type
                             match &msg {
-                                AppMessage::State { path, selected, actions, metadata } => {
+                                AppMessage::State { path, selected, actions, metadata: _ } => {
                                     info!(
                                         "App state updated: path={}, selected={:?}, actions={:?}",
                                         path, selected, actions
                                     );
                                     // TODO: Update frontend with app state
                                 }
-                                AppMessage::DownloadData { filename, data } => {
+                                AppMessage::DownloadData { filename, data: _ } => {
                                     info!("Received download data for: {}", filename);
                                     // TODO: Send file to frontend
                                 }

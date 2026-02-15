@@ -1,10 +1,10 @@
 use anyhow::Result;
-use crate::domain::aggregates::{ApplicationSession, SessionId, AppId, AppVideoConfig};
+use crate::domain::aggregates::{ApplicationSession, AppId, AppVideoConfig};
 use crate::domain::value_objects::UserRole;
 use crate::domain::apps::FileExplorerApp;
 use crate::application::ports::{
     ApplicationSessionRepository, ApplicationLauncherPort, SandboxIsolationPort,
-    AppVideoStreamingPort, BrowserLaunchInfo,
+    // Removed unused imports: AppVideoStreamingPort, BrowserLaunchInfo
 };
 use std::sync::Arc;
 

@@ -4,7 +4,7 @@ use axum::{
         ws::{Message, WebSocket},
         State, WebSocketUpgrade,
     },
-    response::Response,
+    // Removed unused import: Response
 };
 use futures_util::{SinkExt, StreamExt, stream::{SplitSink, SplitStream}};
 use serde::{Deserialize, Serialize};
@@ -13,7 +13,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use tokio::io::AsyncReadExt;
 use tokio::process::ChildStdout;
-use bytes::BufMut;
+// Removed unused import: BufMut
 use webrtc::{
     api::{
         media_engine::MediaEngine,
@@ -274,7 +274,7 @@ impl WebRTCAdapter {
         
             let peers = self.peers.read().await;
             if let Some(pc) = peers.get(session_id) {
-                use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
+                use webrtc::ice_transport::ice_candidate::{RTCIceCandidateInit};
                 let ice_candidate = RTCIceCandidateInit {
                     candidate,
                     sdp_mid,
@@ -503,7 +503,7 @@ async fn stream_vp8_to_track(
     }
     
     // VP8 samples for duration calculation (90kHz / 30fps = 3000)
-    let samples_per_frame = 3000u32;
+    let _samples_per_frame = 3000u32;
     
     loop {
         tokio::select! {

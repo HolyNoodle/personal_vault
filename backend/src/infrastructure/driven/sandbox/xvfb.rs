@@ -4,7 +4,7 @@ use tokio::process::{Child, Command};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use std::collections::HashMap;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use crate::domain::aggregates::VideoSessionId;
 use crate::application::ports::SandboxPort;
 
@@ -96,30 +96,70 @@ impl XvfbManager {
     }
 
     async fn cleanup_session(&self, session_id: &str) -> Result<()> {
+        info!("cleanup_session called for session {}", session_id);
         let mut displays = self.displays.write().await;
+        info!("displays before removal: keys={:?}", displays.keys().collect::<Vec<_>>());
         if let Some(mut session) = displays.remove(session_id) {
+            info!("Session found for cleanup: display_number={}, app_process_present={}, wm_process_present={}, xvfb_process_present={}",
+                session.display_number,
+                session.app_process.is_some(),
+                session.wm_process.is_some(),
+                session.process.is_some());
+            debug!("app_process state for session {}: {:?}", session_id, session.app_process);
             info!("Stopping Xvfb for session {}", session_id);
-            
+
+            // Helper to kill a process and its children
+            async fn kill_process_and_children(child: &mut Child, label: &str) {
+                if let Some(id) = child.id() {
+                    // Send SIGTERM to the process group
+                    #[cfg(unix)]
+                    unsafe {
+                        use libc::{killpg, SIGTERM};
+                        let pgid = libc::getpgid(id as libc::pid_t);
+                        if pgid > 0 {
+                            let res = killpg(pgid, SIGTERM);
+                            if res == 0 {
+                                info!("Sent SIGTERM to {} process group {}", label, pgid);
+                            } else {
+                                error!("Failed to send SIGTERM to {} process group {}", label, pgid);
+                            }
+                        }
+                    }
+                }
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+            }
+
             // Kill application process first
             if let Some(mut child) = session.app_process.take() {
-                let _ = child.kill().await;
-                let _ = child.wait().await;
+                info!("Cleaning up file-explorer process for session {} (pid={:?})", session_id, child.id());
+                kill_process_and_children(&mut child, "app").await;
+                info!("file-explorer process cleanup complete for session {}", session_id);
+            } else {
+                info!("No app_process found for session {} during cleanup", session_id);
             }
-            
+
             // Kill window manager
             if let Some(mut child) = session.wm_process.take() {
-                let _ = child.kill().await;
-                let _ = child.wait().await;
+                info!("Cleaning up window manager for session {} (pid={:?})", session_id, child.id());
+                kill_process_and_children(&mut child, "wm").await;
+                info!("window manager cleanup complete for session {}", session_id);
+            } else {
+                info!("No wm_process found for session {} during cleanup", session_id);
             }
-            
+
             // Then kill Xvfb
             if let Some(mut child) = session.process.take() {
-                if let Err(e) = child.kill().await {
-                    error!("Failed to kill Xvfb process: {}", e);
-                }
-                let _ = child.wait().await;
+                info!("Cleaning up Xvfb for session {} (pid={:?})", session_id, child.id());
+                kill_process_and_children(&mut child, "xvfb").await;
+                info!("Xvfb cleanup complete for session {}", session_id);
+            } else {
+                info!("No Xvfb process found for session {} during cleanup", session_id);
             }
+        } else {
+            info!("No session found for cleanup for session_id={}", session_id);
         }
+        info!("cleanup_session finished for session {}", session_id);
         Ok(())
     }
 
@@ -134,7 +174,6 @@ impl XvfbManager {
                 .and_then(|s| s.dbus_address.clone())
                 .unwrap_or_else(|| "unix:path=/run/user/0/bus".to_string())
         };
-
         // Start window manager for GUI applications (not for terminals)
         if command != "xterm" {
             info!("Starting openbox window manager on display {}", display_str);
@@ -145,15 +184,11 @@ impl XvfbManager {
                 .stderr(Stdio::null())
                 .spawn()
                 .context("Failed to start openbox window manager")?;
-            
-            // Store the window manager process
             let mut displays = self.displays.write().await;
             if let Some(session) = displays.get_mut(session_id) {
                 session.wm_process = Some(wm_process);
             }
             drop(displays);
-            
-            // Give window manager time to start
             tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
         }
 
@@ -200,9 +235,10 @@ impl XvfbManager {
         let mut child = cmd
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .spawn()
-            .context(format!("Failed to launch {}. Make sure it's installed.", command))?;
-
+            .spawn();
+match child {
+    Ok(mut child) => {
+        info!("Spawned app process for session {}: command={}, pid={:?}", session_id, command, child.id());
         // Log child process output for debugging
         if let Some(stdout) = child.stdout.take() {
             use tokio::io::AsyncBufReadExt;
@@ -224,13 +260,21 @@ impl XvfbManager {
                 }
             });
         }
-
         // Store the child process to keep it alive
         let mut displays = self.displays.write().await;
         if let Some(session) = displays.get_mut(session_id) {
+            info!("Storing app_process for session {}: pid={:?}", session_id, child.id());
             session.app_process = Some(child);
+        } else {
+            warn!("Session not found when storing app_process for session {}", session_id);
         }
         drop(displays);
+    }
+    Err(e) => {
+        error!("Failed to launch {} for session {}: {}", command, session_id, e);
+        return Err(anyhow::anyhow!("Failed to launch {}: {}", command, e));
+    }
+}
 
         // Maximize GUI applications after a short delay
         if command != "xterm" {

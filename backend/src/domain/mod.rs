@@ -9,6 +9,5 @@ pub mod apps;
 
 pub use entities::*;
 pub use aggregates::*;
-pub use apps::*;
 pub use value_objects::*;
-pub use events::*;
+// Removed unused imports: apps::*, events::*

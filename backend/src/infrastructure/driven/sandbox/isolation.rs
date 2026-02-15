@@ -79,7 +79,7 @@ impl SandboxIsolationPort for MockSandboxIsolation {
         Ok(())
     }
 
-    async fn get_resource_usage(&self, sandbox_handle: &SandboxHandle) -> Result<ResourceUsage> {
+    async fn get_resource_usage(&self, _sandbox_handle: &SandboxHandle) -> Result<ResourceUsage> {
         // In production, read from cgroups v2
         Ok(ResourceUsage {
             cpu_percent: 25.0,
