@@ -1,8 +1,3 @@
-use crate::domain::value_objects::*;
+// Removed unused import: use crate::domain::value_objects::*;
 
-#[derive(Debug, Clone)]
-pub struct UserRegistered {
-    pub user_id: UserId,
-    pub email: Email,
-    pub role: UserRole,
-}
+// Removed unused struct UserRegistered

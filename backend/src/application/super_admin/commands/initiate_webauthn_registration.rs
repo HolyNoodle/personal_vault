@@ -42,7 +42,7 @@ pub async fn execute(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    // Removed unused import: use super::*;
     
     // TODO: Add tests with mock repositories
     #[tokio::test]

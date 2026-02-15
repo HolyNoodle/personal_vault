@@ -1,3 +1,3 @@
 pub mod file_explorer;
 
-pub use file_explorer::{FileExplorerApp, AppMetadata};
+pub use file_explorer::FileExplorerApp;

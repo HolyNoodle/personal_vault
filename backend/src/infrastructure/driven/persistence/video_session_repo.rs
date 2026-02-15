@@ -1,9 +1,10 @@
-use anyhow::Result;
+use crate::domain::aggregates::VideoSession;
+// ...existing code...
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use std::collections::HashMap;
-use crate::domain::aggregates::{VideoSession, VideoSessionId};
-use crate::application::ports::VideoSessionRepository;
+// ...existing code...
+// Removed import for deleted VideoSessionRepository trait
 
 /// In-memory implementation of VideoSessionRepository
 /// In production, this would use PostgreSQL
@@ -19,30 +20,4 @@ impl InMemoryVideoSessionRepository {
     }
 }
 
-impl VideoSessionRepository for InMemoryVideoSessionRepository {
-    async fn save(&self, session: &VideoSession) -> Result<()> {
-        let mut sessions = self.sessions.write().await;
-        sessions.insert(session.id.to_string(), session.clone());
-        Ok(())
-    }
-
-    async fn find_by_id(&self, id: &VideoSessionId) -> Result<Option<VideoSession>> {
-        let sessions = self.sessions.read().await;
-        Ok(sessions.get(id.as_str()).cloned())
-    }
-
-    async fn find_by_user_id(&self, user_id: &str) -> Result<Vec<VideoSession>> {
-        let sessions = self.sessions.read().await;
-        Ok(sessions
-            .values()
-            .filter(|s| s.user_id == user_id)
-            .cloned()
-            .collect())
-    }
-
-    async fn delete(&self, id: &VideoSessionId) -> Result<()> {
-        let mut sessions = self.sessions.write().await;
-        sessions.remove(id.as_str());
-        Ok(())
-    }
-}
+// Removed trait implementation for deleted VideoSessionRepository methods

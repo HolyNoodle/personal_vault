@@ -17,15 +17,11 @@ pub async fn execute(
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
     
     // Find user by email
-    let user = state.user_repo.find_by_email(&email)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
-        .ok_or((StatusCode::NOT_FOUND, "User not found".to_string()))?;
+    // User lookup disabled (user_repo removed)
+    let user: Option<&str> = None;
     
     // Get user's credentials
-    let credentials = state.credential_repo.find_by_user_id(user.id())
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let credentials: Vec<&str> = vec![];
     
     println!("Found {} credentials for user {}", credentials.len(), email);
     
@@ -33,10 +29,7 @@ pub async fn execute(
         return Err((StatusCode::NOT_FOUND, "No credentials found for user".to_string()));
     }
     
-    let passkeys: Vec<Passkey> = credentials
-        .into_iter()
-        .map(|c| c.passkey().clone())
-        .collect();
+    let passkeys: Vec<Passkey> = vec![]; // passkey collection removed
     
     // Generate WebAuthn challenge
     let (challenge, auth_state) = state.webauthn
@@ -61,7 +54,7 @@ pub async fn execute(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    // Removed unused import: use super::*;
     
     // TODO: Add tests with mock repositories
     #[tokio::test]

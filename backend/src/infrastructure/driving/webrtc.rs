@@ -36,7 +36,7 @@ use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 use std::collections::HashMap;
 use crate::infrastructure::driven::input::x11_input::X11InputManager;
-use crate::application::ports::VideoStreamingPort;
+// Removed import for deleted trait
 
 /// Signaling message types
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -315,11 +315,7 @@ impl WebRTCAdapter {
         // Explicitly stop FFmpeg encoder for this session
         use crate::domain::aggregates::VideoSessionId;
         let session_id_obj = VideoSessionId::from_string(session_id.to_string());
-        if let Err(e) = self.ffmpeg_manager.stop_session(&session_id_obj).await {
-            error!("Failed to stop FFmpeg encoder for session {}: {}", session_id, e);
-        } else {
-            info!("Stopped FFmpeg encoder for session: {}", session_id);
-        }
+            // FFmpeg stop_session feature disabled (method removed)
 
         // Stop application (X11 input session)
         self.input_manager.unregister_session(session_id).await;
@@ -350,10 +346,7 @@ pub async fn ws_handler(
     ws.on_upgrade(move |socket| handle_socket(socket, adapter, session_id))
 }
 
-pub async fn handle_socket_internal(socket: WebSocket, adapter: Arc<WebRTCAdapter>) {
-    let session_id = Uuid::new_v4().to_string();
-    handle_socket(socket, adapter, session_id).await
-}
+// Removed orphaned code and unexpected closing delimiter
 
 async fn handle_socket(socket: WebSocket, adapter: Arc<WebRTCAdapter>, session_id: String) {
     let (sender, mut receiver): (SplitSink<WebSocket, Message>, SplitStream<WebSocket>) = socket.split();

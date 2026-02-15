@@ -35,9 +35,6 @@ impl VideoSession {
     }
 
     /// Mark session as active (WebRTC connected)
-    pub fn mark_active(&mut self) {
-        self.state = SessionState::Active;
-    }
 
     /// Terminate the session
     pub fn terminate(&mut self) {
@@ -45,10 +42,7 @@ impl VideoSession {
         self.ended_at = Some(Utc::now());
     }
 
-    /// Check if session is active
-    pub fn is_active(&self) -> bool {
-        matches!(self.state, SessionState::Active)
-    }
+    // Removed unused methods mark_active and is_active
 }
 
 /// Session state

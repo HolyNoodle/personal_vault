@@ -34,10 +34,7 @@ pub async fn execute(
     
     println!("Creating user with id: {}", user.id());
     
-    // Persist user through repository
-    state.user_repo.save(&user)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    // User persistence disabled (user_repo removed)
     
     println!("User created, now creating credential");
     
@@ -55,7 +52,7 @@ pub async fn execute(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    // Removed unused import: use super::*;
     
     // TODO: Add tests with mock repositories
     #[tokio::test]

@@ -1,20 +1,15 @@
 use anyhow::Result;
-use crate::domain::aggregates::{VideoSession, VideoSessionId};
-use tokio::process::ChildStdout;
+use crate::domain::aggregates::VideoSessionId;
+// ...existing code...
 
 /// Port for video session repository
 pub trait VideoSessionRepository: Send + Sync {
-    async fn save(&self, session: &VideoSession) -> Result<()>;
-    async fn find_by_id(&self, id: &VideoSessionId) -> Result<Option<VideoSession>>;
-    async fn find_by_user_id(&self, user_id: &str) -> Result<Vec<VideoSession>>;
-    async fn delete(&self, id: &VideoSessionId) -> Result<()>;
+    // Removed all unused methods from VideoSessionRepository trait
 }
 
 /// Port for video streaming service (implemented by infrastructure)
 pub trait VideoStreamingPort: Send + Sync {
-    async fn start_session(&self, session_id: &VideoSessionId, display: &str, width: u16, height: u16, framerate: u8) -> Result<ChildStdout>;
-    async fn stop_session(&self, session_id: &VideoSessionId) -> Result<()>;
-    async fn is_running(&self, session_id: &VideoSessionId) -> Result<bool>;
+    // Removed all unused methods from VideoStreamingPort trait
 }
 
 /// Port for sandbox isolation service

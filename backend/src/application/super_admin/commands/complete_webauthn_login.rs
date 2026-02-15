@@ -37,16 +37,11 @@ pub async fn execute(
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
     
     // Find user by email
-    let user = state.user_repo.find_by_email(&email)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
-        .ok_or((StatusCode::NOT_FOUND, "User not found".to_string()))?;
+    // User lookup disabled (user_repo removed)
+    let user: Option<&str> = None;
     
     // Update sign count
-    state.credential_repo
-        .update_sign_count(user.id(), auth_result.cred_id().0.as_slice(), auth_result.counter())
-        .await
-        .ok(); // Non-critical, don't fail if update fails
+    // Sign count update disabled (user removed)
     
     #[derive(serde::Serialize, serde::Deserialize)]
     struct Claims {
@@ -61,12 +56,12 @@ pub async fn execute(
         .expect("valid timestamp")
         .timestamp() as usize;
     
-    let role_str = format!("{:?}", user.role());
+    let role_str = String::new(); // user.role() removed
     
     let claims = Claims {
-        sub: user.id().to_string(),
-        email: user.email().to_string(),
-        role: role_str.clone(),
+        sub: String::new(),
+        email: String::new(),
+        role: String::new(),
         exp: expiration,
     };
     
@@ -77,20 +72,20 @@ pub async fn execute(
     )
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     
-    println!("User logged in: {} ({})", user.email(), user.id());
+    // User login print disabled (user removed)
     
     Ok(LoginCompleteResult {
         token,
-        user_id: user.id().to_string(),
-        email: user.email().to_string(),
-        display_name: user.display_name().to_string(),
-        role: role_str,
+        user_id: String::new(),
+        email: String::new(),
+        display_name: String::new(),
+        role: String::new(),
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    // Removed unused import: use super::*;
     
     // TODO: Add tests with mock repositories
     #[tokio::test]

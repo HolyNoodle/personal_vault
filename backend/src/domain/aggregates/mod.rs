@@ -6,11 +6,11 @@ pub mod application_session;
 // pub use user_aggregate::UserAggregate;
 
 // Legacy video session (being phased out in favor of application_session)
-pub use video_session::{VideoSession, VideoSessionId, VideoConfig, VideoCodec, SessionState};
+pub use video_session::{VideoSession, VideoSessionId, VideoConfig, VideoCodec};
 
 // New application-centric model
 pub use application_session::{
     ApplicationSession, SessionId, AppId, SandboxedExecution,
     VideoConfig as AppVideoConfig, VideoCodec as AppVideoCodec, 
-    SandboxConstraints, ResourceLimits, SessionState as AppSessionState,
+    SandboxConstraints, ResourceLimits,
 };

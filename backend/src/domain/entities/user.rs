@@ -56,15 +56,5 @@ impl User {
         self.status
     }
     
-    pub fn is_active(&self) -> bool {
-        self.status == UserStatus::Active
-    }
-    
-    pub fn suspend(&mut self) {
-        self.status = UserStatus::Suspended;
-    }
-    
-    pub fn activate(&mut self) {
-        self.status = UserStatus::Active;
-    }
+    // Removed unused methods is_active, suspend, and activate
 }

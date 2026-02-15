@@ -105,6 +105,7 @@ services:
         condition: service_healthy
     working_dir: /app/backend
     command: cargo watch -x run
+    user: "1000:1000"
 
   # Frontend (Development)
   frontend:

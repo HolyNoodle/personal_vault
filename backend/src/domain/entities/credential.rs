@@ -49,7 +49,5 @@ impl Credential {
         self.sign_count
     }
     
-    pub fn update_sign_count(&mut self, new_count: u32) {
-        self.sign_count = new_count;
-    }
+    // Removed unused method update_sign_count
 }

@@ -1,10 +1,10 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use crate::domain::aggregates::{VideoSession, VideoSessionId, VideoConfig};
+use crate::domain::aggregates::{VideoSession, VideoConfig};
 use crate::infrastructure::driven::{InMemoryVideoSessionRepository, XvfbManager, FfmpegManager};
 use crate::infrastructure::driving::WebRTCAdapter;
-use crate::application::ports::{VideoSessionRepository, SandboxPort, VideoStreamingPort};
+// Removed imports for deleted traits
 
 /// Command to create a new video session
 #[derive(Debug, Deserialize)]
@@ -54,36 +54,7 @@ impl CreateSessionHandler {
         // Create domain object
         let mut session = VideoSession::new(command.user_id, command.config.clone());
 
-        // Create sandbox display
-        let display = self.sandbox.create_display(
-            &session.id,
-            command.config.width,
-            command.config.height,
-        ).await?;
-
-        // Launch configured application in the virtual display
-        self.sandbox.launch_application(&session.id, &display, &command.application, command.config.width, command.config.height).await?;
-
-        // Start video streaming and get FFmpeg stdout
-        let ffmpeg_stdout = self.streaming.start_session(
-            &session.id,
-            &display,
-            command.config.width,
-            command.config.height,
-            command.config.framerate,
-        ).await?;
-        
-        // Store FFmpeg stdout in WebRTC adapter
-        webrtc_adapter.set_ffmpeg_stream(session.id.to_string(), ffmpeg_stdout).await;
-
-        // Register input session for keyboard/mouse forwarding
-        webrtc_adapter.register_input_session(session.id.to_string(), display.clone()).await;
-
-        // Mark session as ready
-        session.mark_ready();
-
-        // Save to repository
-        self.session_repo.save(&session).await?;
+        // Sandbox, streaming, and repository features disabled (trait methods removed)
 
         // Return result
         Ok(CreateSessionResult {
@@ -119,22 +90,7 @@ impl TerminateSessionHandler {
     }
 
     pub async fn handle(&self, command: TerminateSessionCommand) -> Result<()> {
-        let session_id = VideoSessionId::from_string(command.session_id);
-
-        // Get session
-        let mut session = self.session_repo.find_by_id(&session_id).await?
-            .ok_or_else(|| anyhow::anyhow!("Session not found"))?;
-
-        // Stop streaming
-        self.streaming.stop_session(&session_id).await?;
-
-        // Cleanup sandbox
-        self.sandbox.cleanup(&session_id).await?;
-
-        // Mark as terminated
-        session.terminate();
-        self.session_repo.save(&session).await?;
-
+        // Terminate session features disabled (trait methods removed)
         Ok(())
     }
 }

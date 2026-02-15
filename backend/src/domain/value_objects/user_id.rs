@@ -13,9 +13,7 @@ impl UserId {
         Self(id)
     }
     
-    pub fn as_uuid(&self) -> &uuid::Uuid {
-        &self.0
-    }
+    // Removed unused method as_uuid
 }
 
 impl fmt::Display for UserId {

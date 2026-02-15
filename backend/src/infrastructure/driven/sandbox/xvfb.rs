@@ -5,8 +5,8 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use std::collections::HashMap;
 use tracing::{debug, error, info, warn};
-use crate::domain::aggregates::VideoSessionId;
-use crate::application::ports::SandboxPort;
+// ...existing code...
+// Removed import for deleted SandboxPort trait
 
 /// Manages Xvfb (X Virtual Framebuffer) instances
 pub struct XvfbManager {
@@ -232,7 +232,7 @@ impl XvfbManager {
             }
         }
         
-        let mut child = cmd
+        let child = cmd
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn();
@@ -298,17 +298,4 @@ match child {
     }
 }
 
-impl SandboxPort for XvfbManager {
-    async fn create_display(&self, session_id: &VideoSessionId, width: u16, height: u16) -> Result<String> {
-        let (_display_num, display, _dbus_address) = self.start_xvfb(session_id.as_str(), width, height).await?;
-        Ok(display)
-    }
-
-    async fn launch_application(&self, session_id: &VideoSessionId, display: &str, app: &str, width: u16, height: u16) -> Result<()> {
-        self.launch_app(session_id.as_str(), display, app, width, height).await
-    }
-
-    async fn cleanup(&self, session_id: &VideoSessionId) -> Result<()> {
-        self.cleanup_session(session_id.as_str()).await
-    }
-}
+// Removed trait implementation for deleted SandboxPort

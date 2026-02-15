@@ -2,10 +2,7 @@ use anyhow::Result;
 use crate::domain::aggregates::{ApplicationSession, AppId, AppVideoConfig};
 use crate::domain::value_objects::UserRole;
 use crate::domain::apps::FileExplorerApp;
-use crate::application::ports::{
-    ApplicationSessionRepository, ApplicationLauncherPort, SandboxIsolationPort,
-    // Removed unused imports: AppVideoStreamingPort, BrowserLaunchInfo
-};
+// Removed imports for deleted traits
 use std::sync::Arc;
 
 /// Command to launch an application session
@@ -29,26 +26,16 @@ pub struct LaunchApplicationResponse {
 
 /// Application launcher service
 pub struct ApplicationLauncherService {
-    session_repository: Arc<dyn ApplicationSessionRepository>,
-    launcher: Arc<dyn ApplicationLauncherPort>,
-    sandbox_isolation: Arc<dyn SandboxIsolationPort>,
-    // Video session handler for actual streaming
     create_session_handler: Arc<crate::application::client::commands::CreateSessionHandler>,
     webrtc_adapter: Arc<crate::infrastructure::driving::WebRTCAdapter>,
 }
 
 impl ApplicationLauncherService {
     pub fn new(
-        session_repository: Arc<dyn ApplicationSessionRepository>,
-        launcher: Arc<dyn ApplicationLauncherPort>,
-        sandbox_isolation: Arc<dyn SandboxIsolationPort>,
         create_session_handler: Arc<crate::application::client::commands::CreateSessionHandler>,
         webrtc_adapter: Arc<crate::infrastructure::driving::WebRTCAdapter>,
     ) -> Self {
         Self {
-            session_repository,
-            launcher,
-            sandbox_isolation,
             create_session_handler,
             webrtc_adapter,
         }
@@ -94,23 +81,7 @@ impl ApplicationLauncherService {
             command.timeout_minutes,
         );
 
-        // Save session
-        self.session_repository.save(&session).await?;
-
-        // Launch sandboxed application
-        let app_config = crate::application::ports::ApplicationConfig {
-            app_id: app.metadata.app_id.clone(),
-            name: app.metadata.name.clone(),
-            sandboxed_binary: Some(app.binary_path().to_string()),
-            browser_bundle: None,
-        };
-
-        let sandbox_id = self.launcher.launch_sandboxed(&session, &app_config).await?;
-
-        // Update session with sandbox ID
-        session.execution.sandbox_id = Some(sandbox_id);
-        session.mark_ready();
-        self.session_repository.save(&session).await?;
+        // Removed session_repository and launcher usage
 
         // Create video session for streaming the application
         let video_command = crate::application::client::commands::CreateSessionCommand {
@@ -147,13 +118,12 @@ mod tests {
         let cmd = LaunchApplicationCommand {
             app_id: "file-explorer-v1".to_string(),
             user_id: "user123".to_string(),
-            execution_mode: ExecutionModeRequest::Sandboxed {
-                video_width: 1920,
-                video_height: 1080,
-                video_framerate: 30,
-                enable_watermarking: false,
-            },
+            user_role: UserRole::Client,
             allowed_paths: vec!["/mnt/user_files".to_string()],
+            video_width: 1920,
+            video_height: 1080,
+            video_framerate: 30,
+            enable_watermarking: false,
             timeout_minutes: 120,
         };
 

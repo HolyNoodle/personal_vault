@@ -1,4 +1,3 @@
-use anyhow::Result;
 use crate::domain::aggregates::{AppId, SandboxConstraints, ResourceLimits};
 use crate::domain::value_objects::UserRole;
 
@@ -14,8 +13,6 @@ impl FileExplorerApp {
             metadata: AppMetadata {
                 app_id: AppId::new("file-explorer-v1"),
                 name: "File Explorer".to_string(),
-                description: "Browse and preview files (PDF, images, videos) via sandboxed environment".to_string(),
-                version: "1.0.0".to_string(),
             },
         }
     }
@@ -40,30 +37,7 @@ impl FileExplorerApp {
         }
     }
 
-    /// Get sandboxed binary path
-    pub fn binary_path(&self) -> &str {
-        // Custom Rust file explorer using egui (built in workspace target)
-        "/app/target/release/file-explorer"
-    }
-
-    /// Validate file path is within allowed paths
-    pub fn validate_path(&self, requested_path: &str, allowed_paths: &[String]) -> Result<()> {
-        let canonical = std::path::Path::new(requested_path)
-            .canonicalize()
-            .map_err(|e| anyhow::anyhow!("Invalid path: {}", e))?;
-
-        for allowed in allowed_paths {
-            let allowed_canonical = std::path::Path::new(allowed)
-                .canonicalize()
-                .unwrap_or_else(|_| std::path::PathBuf::from(allowed));
-
-            if canonical.starts_with(&allowed_canonical) {
-                return Ok(());
-            }
-        }
-
-        Err(anyhow::anyhow!("Access denied: path not in allowed paths"))
-    }
+    // Removed unused method validate_path
 }
 
 impl Default for FileExplorerApp {
@@ -76,8 +50,6 @@ impl Default for FileExplorerApp {
 pub struct AppMetadata {
     pub app_id: AppId,
     pub name: String,
-    pub description: String,
-    pub version: String,
 }
 
 #[cfg(test)]
@@ -93,7 +65,7 @@ mod tests {
 
     #[test]
     fn test_sandbox_constraints() {
-        use crate::domain::aggregates::UserRole;
+        use crate::domain::value_objects::UserRole;
         let app = FileExplorerApp::new();
         
         let owner_constraints = app.sandbox_constraints(

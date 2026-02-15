@@ -1,27 +1,24 @@
+use infrastructure::AppState;
 use axum::{
     routing::get,
     Router,
-    extract::{WebSocketUpgrade, State},
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::cors::{CorsLayer, Any};
-use url::Url;
-use webauthn_rs::Webauthn;
 
 mod domain;
 mod application;
 mod infrastructure;
 
 use infrastructure::driving::{WebRTCAdapter};
-use infrastructure::driven::{XvfbManager, FfmpegManager, InMemoryVideoSessionRepository, InMemorySessionRepository, MockApplicationLauncher, IpcSocketServer};
-use infrastructure::driven::persistence::{PostgresUserRepository, PostgresCredentialRepository, RedisChallengeRepository};
+use infrastructure::driven::{XvfbManager, FfmpegManager, InMemoryVideoSessionRepository, IpcSocketServer};
+use infrastructure::driven::persistence::{PostgresCredentialRepository, RedisChallengeRepository};
 use infrastructure::driving::http::video_api::{ApiState, create_video_api_router};
-use infrastructure::driving::http::application_routes::{AppHandlerState, launch_application, list_applications};
+use infrastructure::driving::http::application_routes::AppHandlerState;
 use infrastructure::driving::http::auth;
-use infrastructure::AppState;
-use application::client::commands::{CreateSessionHandler, TerminateSessionHandler, ApplicationLauncherService};
-use application::ports::{UserRepository, CredentialRepository, ChallengeRepository};
+use application::client::commands::{CreateSessionHandler, TerminateSessionHandler};
+use application::ports::{CredentialRepository, ChallengeRepository};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -62,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✅ Database migrations completed");
     
     // Initialize auth repositories
-    let user_repo = Arc::new(PostgresUserRepository::new(pool.clone())) as Arc<dyn UserRepository>;
+    // user_repo removed
     let credential_repo = Arc::new(PostgresCredentialRepository::new(pool)) as Arc<dyn CredentialRepository>;
     
     // Initialize Redis challenge repository
@@ -77,7 +74,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app_state = AppState {
         webauthn,
         jwt_secret,
-        user_repo,
         credential_repo,
         challenge_repo,
     };
@@ -88,7 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let streaming = Arc::new(FfmpegManager::new());
 
     // Pass ffmpeg_manager to WebRTCAdapter
-    let webrtc_adapter = Arc::new(WebRTCAdapter::new(streaming.clone()));
+    let _webrtc_adapter = Arc::new(WebRTCAdapter::new(streaming.clone()));
     
     // Initialize application layer (command handlers)
     let create_session_handler = Arc::new(CreateSessionHandler::new(
@@ -107,22 +103,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let webrtc_adapter = Arc::new(WebRTCAdapter::new(streaming.clone()));
     
     // Initialize APPLICATION PLATFORM infrastructure
-    let app_session_repo = Arc::new(InMemorySessionRepository::new());
-    let app_launcher = Arc::new(MockApplicationLauncher);
-    let sandbox_isolation = Arc::new(infrastructure::driven::sandbox::isolation::MockSandboxIsolation);
-    
-    // Initialize application launcher service with video session infrastructure
-    let launcher_service = Arc::new(ApplicationLauncherService::new(
-        app_session_repo.clone(),
-        app_launcher.clone(),
-        sandbox_isolation.clone(),
-        create_session_handler.clone(),
-        webrtc_adapter.clone(),
-    ));
+    // Removed initialization of deleted trait objects and ApplicationLauncherService::new with deleted fields
     
     // Create application handler state
     let app_handler_state = AppHandlerState {
-        launcher_service: Arc::clone(&launcher_service),
+        // Removed launcher_service reference
     };
     
     // Create API state
@@ -159,8 +144,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Application platform routes
     let app_routes = Router::new()
-        .route("/api/applications", axum::routing::get(list_applications))
-        .route("/api/applications/launch", axum::routing::post(launch_application))
+        // .route("/api/applications", axum::routing::get(list_applications))
         .with_state(app_handler_state);
     
     // Merge all routes

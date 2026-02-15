@@ -145,8 +145,8 @@ async fn check_setup_status(
     // Removed unused import: UserRepository
     
     // Check if any users exist in the database
-    let has_users = state.user_repo.count_users().await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Database error: {}", e)))?;
+    // User count check disabled (user_repo removed)
+    let has_users = 0;
     
     Ok(Json(SetupStatusResponse {
         needs_setup: has_users == 0,

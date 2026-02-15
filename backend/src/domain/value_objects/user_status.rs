@@ -8,20 +8,5 @@ pub enum UserStatus {
 }
 
 impl UserStatus {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            UserStatus::Active => "active",
-            UserStatus::Suspended => "suspended",
-            UserStatus::Deleted => "deleted",
-        }
-    }
-    
-    pub fn from_str(s: &str) -> Result<Self, String> {
-        match s {
-            "active" => Ok(UserStatus::Active),
-            "suspended" => Ok(UserStatus::Suspended),
-            "deleted" => Ok(UserStatus::Deleted),
-            _ => Err(format!("Invalid status: {}", s)),
-        }
-    }
+    // Removed unused methods as_str and from_str
 }
