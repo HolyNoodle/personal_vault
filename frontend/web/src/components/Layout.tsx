@@ -11,7 +11,6 @@ import {
   Container,
 } from '@mui/material'
 import AppsIcon from '@mui/icons-material/Apps'
-import FolderIcon from '@mui/icons-material/Folder'
 import VideoCallIcon from '@mui/icons-material/VideoCall'
 import LogoutIcon from '@mui/icons-material/Logout'
 import { useAuthStore } from '../store/authStore'
@@ -26,6 +25,24 @@ export function Layout({ children }: LayoutProps) {
   const navigate = useNavigate()
   const location = useLocation()
 
+  const isVideoPage = location.pathname === '/video'
+
+  const getPageTitle = () => {
+    switch (location.pathname) {
+      case '/applications':
+      case '/':
+        return 'Applications'
+      case '/sessions':
+        return t('nav.sessions')
+      case '/video':
+        return 'Application Session'
+      case '/launch':
+        return 'Launch Application'
+      default:
+        return t('app.title')
+    }
+  }
+
   const handleLogout = () => {
     logout()
     navigate('/login')
@@ -36,7 +53,7 @@ export function Layout({ children }: LayoutProps) {
       <AppBar position="static">
         <Toolbar>
           <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-            {t('app.title')}
+            {getPageTitle()}
           </Typography>
           
           <Button
@@ -49,18 +66,6 @@ export function Layout({ children }: LayoutProps) {
             }}
           >
             Applications
-          </Button>
-          
-          <Button
-            color="inherit"
-            startIcon={<FolderIcon />}
-            onClick={() => navigate('/files')}
-            sx={{ 
-              mx: 1,
-              backgroundColor: location.pathname === '/files' ? 'rgba(255,255,255,0.1)' : 'transparent'
-            }}
-          >
-            {t('nav.files')}
           </Button>
           
           <Button
@@ -86,9 +91,15 @@ export function Layout({ children }: LayoutProps) {
         </Toolbar>
       </AppBar>
       
-      <Container component="main" sx={{ flex: 1, py: 4 }} maxWidth="xl">
-        {children}
-      </Container>
+      {isVideoPage ? (
+        <Box sx={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+          {children}
+        </Box>
+      ) : (
+        <Container component="main" sx={{ flex: 1, py: 4 }} maxWidth="xl">
+          {children}
+        </Container>
+      )}
     </Box>
   )
 }

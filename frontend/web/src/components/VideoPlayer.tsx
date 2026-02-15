@@ -24,6 +24,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const wsRef = useRef<WebSocket | null>(null)
   const mountedRef = useRef(true)
   const connectionInitializedRef = useRef(false)
+  const resizeTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const [connectionState, setConnectionState] = useState<string>('new')
   const [error, setError] = useState<string | null>(null)
 
@@ -202,6 +203,50 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, [websocketUrl]) // Only re-run if websocketUrl changes
 
+  // Handle dynamic resolution changes on resize
+  useEffect(() => {
+    const container = containerRef.current
+    const ws = wsRef.current
+    if (!container || !ws) return
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) return
+
+      const { width, height } = entry.contentRect
+      
+      // Debounce resize events (wait 500ms after user stops resizing)
+      if (resizeTimeoutRef.current) {
+        clearTimeout(resizeTimeoutRef.current)
+      }
+
+      resizeTimeoutRef.current = setTimeout(() => {
+        // Calculate new resolution based on container size
+        const newWidth = Math.max(640, Math.min(Math.round(width), 1920))
+        const newHeight = Math.max(480, Math.min(Math.round(height), 1080))
+        
+        console.log('📐 Requesting resolution change:', { width: newWidth, height: newHeight })
+        
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'resize',
+            width: newWidth,
+            height: newHeight
+          }))
+        }
+      }, 500)
+    })
+
+    resizeObserver.observe(container)
+
+    return () => {
+      resizeObserver.disconnect()
+      if (resizeTimeoutRef.current) {
+        clearTimeout(resizeTimeoutRef.current)
+      }
+    }
+  }, [connectionState])
+
   // Handle input events
   useEffect(() => {
     const container = containerRef.current
@@ -267,7 +312,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, [connectionState])
 
   return (
-    <Box ref={containerRef} sx={{ position: 'relative', width: '100%', height: '100%', minHeight: 400, outline: 'none' }}>
+    <Box ref={containerRef} sx={{ 
+      position: 'relative', 
+      width: '100%', 
+      height: '100%',
+      outline: 'none',
+      bgcolor: '#000'
+    }}>
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
@@ -293,7 +344,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           width: '100%',
           height: '100%',
           backgroundColor: '#000',
-          borderRadius: 4
+          objectFit: 'fill',
+          display: 'block'
         }}
       />
       

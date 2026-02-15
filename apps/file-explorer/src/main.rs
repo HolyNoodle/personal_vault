@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use base64::Engine;
 use eframe::egui;
-use shared::PlatformMessage;
+use shared::{AppMessage, PlatformMessage};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -9,7 +9,11 @@ use tokio::net::UnixStream;
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
-const SOCKET_PATH: &str = "/tmp/sandbox-ipc.sock";
+// Get socket path from environment or use default
+fn get_socket_path() -> String {
+    std::env::var("IPC_SOCKET_PATH")
+        .unwrap_or_else(|_| "/tmp/ipc/sandbox-ipc.sock".to_string())
+}
 
 #[derive(Default)]
 struct FileItem {
@@ -24,17 +28,17 @@ struct FileExplorerApp {
     items: Vec<FileItem>,
     selected_index: Option<usize>,
     error_message: Option<String>,
-    tx: mpsc::UnboundedSender<PlatformMessage>,
+    tx: mpsc::UnboundedSender<AppMessage>,
     rx: Arc<Mutex<mpsc::UnboundedReceiver<PlatformMessage>>>,
 }
 
 impl FileExplorerApp {
     fn new(
-        tx: mpsc::UnboundedSender<PlatformMessage>,
+        tx: mpsc::UnboundedSender<AppMessage>,
         rx: Arc<Mutex<mpsc::UnboundedReceiver<PlatformMessage>>>,
     ) -> Self {
         let mut app = Self {
-            current_path: PathBuf::from("/home"),
+            current_path: PathBuf::from("/data/storage"),
             items: Vec::new(),
             selected_index: None,
             error_message: None,
@@ -82,13 +86,11 @@ impl FileExplorerApp {
 
         let actions = self.get_contextual_actions();
 
-        let _ = self.tx.send(PlatformMessage::Command {
-            command: "update_state".to_string(),
-            params: serde_json::json!({
-                "path": self.current_path.display().to_string(),
-                "selected": selected_path.unwrap_or_default(),
-                "actions": actions,
-            }),
+        let _ = self.tx.send(AppMessage::State {
+            path: self.current_path.display().to_string(),
+            selected: selected_path,
+            actions,
+            metadata: serde_json::json!({}),
         });
     }
 
@@ -130,30 +132,24 @@ impl FileExplorerApp {
                         Ok(_) => {
                             info!("File uploaded: {}", filename);
                             self.refresh_directory();
-                            let _ = self.tx.send(PlatformMessage::Command {
-                                command: "success".to_string(),
-                                params: serde_json::json!({
-                                    "message": format!("File {} uploaded successfully", filename)
-                                }),
+                            let _ = self.tx.send(AppMessage::Success {
+                                operation: "upload".to_string(),
+                                message: Some(format!("File {} uploaded successfully", filename)),
                             });
                         }
                         Err(e) => {
                             error!("Failed to write file: {}", e);
-                            let _ = self.tx.send(PlatformMessage::Command {
-                                command: "error".to_string(),
-                                params: serde_json::json!({
-                                    "message": format!("Failed to write file: {}", e)
-                                }),
+                            let _ = self.tx.send(AppMessage::Error {
+                                message: format!("Failed to write file: {}", e),
+                                code: None,
                             });
                         }
                     },
                     Err(e) => {
                         error!("Failed to decode file data: {}", e);
-                        let _ = self.tx.send(PlatformMessage::Command {
-                            command: "error".to_string(),
-                            params: serde_json::json!({
-                                "message": format!("Failed to decode file: {}", e)
-                            }),
+                        let _ = self.tx.send(AppMessage::Error {
+                            message: format!("Failed to decode file: {}", e),
+                            code: None,
                         });
                     }
                 }
@@ -164,23 +160,16 @@ impl FileExplorerApp {
                         if !item.is_dir {
                             match std::fs::read(&item.path) {
                                 Ok(bytes) => {
-                                    let encoded =
-                                        base64::engine::general_purpose::STANDARD.encode(bytes);
-                                    let _ = self.tx.send(PlatformMessage::Command {
-                                        command: "download_data".to_string(),
-                                        params: serde_json::json!({
-                                            "filename": item.name.clone(),
-                                            "data": encoded
-                                        }),
+                                    let _ = self.tx.send(AppMessage::DownloadData {
+                                        filename: item.name.clone(),
+                                        data: bytes,
                                     });
                                 }
                                 Err(e) => {
                                     error!("Failed to read file: {}", e);
-                                    let _ = self.tx.send(PlatformMessage::Command {
-                                        command: "error".to_string(),
-                                        params: serde_json::json!({
-                                            "message": format!("Failed to read file: {}", e)
-                                        }),
+                                    let _ = self.tx.send(AppMessage::Error {
+                                        message: format!("Failed to read file: {}", e),
+                                        code: None,
                                     });
                                 }
                             }
@@ -205,20 +194,16 @@ impl FileExplorerApp {
                             Ok(_) => {
                                 info!("Deleted: {}", item_path.display());
                                 self.refresh_directory();
-                                let _ = self.tx.send(PlatformMessage::Command {
-                                    command: "success".to_string(),
-                                    params: serde_json::json!({
-                                        "message": format!("Deleted {}", item_name)
-                                    }),
+                                let _ = self.tx.send(AppMessage::Success {
+                                    operation: "delete".to_string(),
+                                    message: Some(format!("Deleted {}", item_name)),
                                 });
                             }
                             Err(e) => {
                                 error!("Failed to delete: {}", e);
-                                let _ = self.tx.send(PlatformMessage::Command {
-                                    command: "error".to_string(),
-                                    params: serde_json::json!({
-                                        "message": format!("Failed to delete: {}", e)
-                                    }),
+                                let _ = self.tx.send(AppMessage::Error {
+                                    message: format!("Failed to delete: {}", e),
+                                    code: None,
                                 });
                             }
                         }
@@ -312,18 +297,18 @@ impl eframe::App for FileExplorerApp {
 
                 if actions.contains(&"upload".to_string()) {
                     if ui.button("📤 Upload").clicked() {
-                        let _ = self.tx.send(PlatformMessage::Command {
-                            command: "trigger_upload".to_string(),
-                            params: serde_json::json!({}),
+                        let _ = self.tx.send(AppMessage::Log {
+                            level: shared::LogLevel::Info,
+                            message: "User clicked upload button".to_string(),
                         });
                     }
                 }
 
                 if actions.contains(&"download".to_string()) {
                     if ui.button("📥 Download").clicked() {
-                        let _ = self.tx.send(PlatformMessage::Command {
-                            command: "trigger_download".to_string(),
-                            params: serde_json::json!({}),
+                        let _ = self.tx.send(AppMessage::Log {
+                            level: shared::LogLevel::Info,
+                            message: "User clicked download button".to_string(),
                         });
                     }
                 }
@@ -347,18 +332,21 @@ async fn main() -> Result<()> {
 
     info!("Starting file explorer app...");
 
-    // Connect to platform via Unix socket
-    let socket = UnixStream::connect(SOCKET_PATH)
-        .await
-        .context("Failed to connect to platform socket")?;
+    let socket_path = get_socket_path();
+    info!("Attempting to connect to IPC socket at {}", socket_path);
 
-    info!("Connected to platform at {}", SOCKET_PATH);
+    // Connect to platform via Unix socket
+    let socket = UnixStream::connect(&socket_path)
+        .await
+        .context(format!("Failed to connect to platform socket at {}", socket_path))?;
+
+    info!("Connected to platform at {}", socket_path);
 
     let (reader, mut writer) = socket.into_split();
     let mut reader = BufReader::new(reader);
 
     // Create channels for bidirectional communication
-    let (tx_to_platform, mut rx_from_app) = mpsc::unbounded_channel::<PlatformMessage>();
+    let (tx_to_platform, mut rx_from_app) = mpsc::unbounded_channel::<AppMessage>();
     let (tx_to_app, rx_from_platform) = mpsc::unbounded_channel::<PlatformMessage>();
     let rx_from_platform = Arc::new(Mutex::new(rx_from_platform));
 
@@ -403,8 +391,9 @@ async fn main() -> Result<()> {
     // Run the GUI in the main thread
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([800.0, 600.0])
-            .with_title("File Explorer"),
+            .with_inner_size([1920.0, 1080.0])
+            .with_title("File Explorer")
+            .with_maximized(true),
         ..Default::default()
     };
 

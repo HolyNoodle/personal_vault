@@ -124,7 +124,7 @@ export function LoginPage() {
 
       // Store auth state and navigate
       login(user, token);
-      navigate('/files');
+      navigate('/');
     } catch (err) {
       console.error('Login error:', err);
       setError(err instanceof Error ? err.message : 'Login failed');

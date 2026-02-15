@@ -77,7 +77,7 @@ impl WebRTCAdapter {
         self.input_manager.register_session(session_id, display).await;
     }
 
-    async fn create_peer_connection(&self, session_id: &str) -> Result<(Arc<RTCPeerConnection>, Arc<TrackLocalStaticSample>)> {
+    async fn create_peer_connection(&self, session_id: &str, ws_sender: Arc<tokio::sync::Mutex<SplitSink<WebSocket, Message>>>) -> Result<(Arc<RTCPeerConnection>, Arc<TrackLocalStaticSample>)> {
         // Create media engine
         let mut media_engine = MediaEngine::default();
         
@@ -173,6 +173,22 @@ impl WebRTCAdapter {
         tokens.insert(session_id.to_string(), cancel_token.clone());
         drop(tokens);
         
+        // Set up ICE candidate handler to send candidates to client
+        let ws_sender_clone = Arc::clone(&ws_sender);
+        peer_connection.on_ice_candidate(Box::new(move |candidate: Option<webrtc::ice_transport::ice_candidate::RTCIceCandidate>| {
+            let sender = Arc::clone(&ws_sender_clone);
+            Box::pin(async move {
+                if let Some(candidate) = candidate {
+                    let candidate_str = candidate.to_json().await.unwrap_or_default().candidate;
+                    let msg = SignalingMessage::IceCandidate { candidate: candidate_str };
+                    if let Ok(json) = serde_json::to_string(&msg) {
+                        let mut sender_lock = sender.lock().await;
+                        let _ = sender_lock.send(Message::Text(json)).await;
+                    }
+                }
+            })
+        }));
+        
         // Set up connection state handler to stop streaming on failure
         let session_id_clone = session_id.to_string();
         let cancel_token_clone = cancel_token.clone();
@@ -194,11 +210,11 @@ impl WebRTCAdapter {
         Ok((peer_connection, video_track))
     }
 
-    async fn handle_request_offer(&self, session_id: &str) -> Result<String> {
+    async fn handle_request_offer(&self, session_id: &str, ws_sender: Arc<tokio::sync::Mutex<SplitSink<WebSocket, Message>>>) -> Result<String> {
         info!("Creating WebRTC offer for session: {}", session_id);
         
         // Create peer connection
-        let (peer_connection, video_track) = self.create_peer_connection(session_id).await?;
+        let (peer_connection, video_track) = self.create_peer_connection(session_id, ws_sender).await?;
         
         // Create offer
         let offer = peer_connection.create_offer(None).await?;
@@ -302,7 +318,8 @@ pub async fn handle_socket_internal(socket: WebSocket, adapter: Arc<WebRTCAdapte
 }
 
 async fn handle_socket(socket: WebSocket, adapter: Arc<WebRTCAdapter>, session_id: String) {
-    let (mut sender, mut receiver): (SplitSink<WebSocket, Message>, SplitStream<WebSocket>) = socket.split();
+    let (sender, mut receiver): (SplitSink<WebSocket, Message>, SplitStream<WebSocket>) = socket.split();
+    let sender = Arc::new(tokio::sync::Mutex::new(sender));
     
     info!("WebSocket connection established for session: {}", session_id);
 
@@ -318,12 +335,14 @@ async fn handle_socket(socket: WebSocket, adapter: Arc<WebRTCAdapter>, session_i
                                 message,
                                 &session_id,
                                 &adapter,
+                                Arc::clone(&sender),
                             ).await;
                             
                             match response {
                                 Ok(Some(msg)) => {
                                     if let Ok(json) = serde_json::to_string(&msg) {
-                                        let _ = sender.send(Message::Text(json)).await;
+                                        let mut sender_lock = sender.lock().await;
+                                        let _ = sender_lock.send(Message::Text(json)).await;
                                     }
                                 }
                                 Ok(None) => {}
@@ -333,7 +352,8 @@ async fn handle_socket(socket: WebSocket, adapter: Arc<WebRTCAdapter>, session_i
                                         message: e.to_string(),
                                     };
                                     if let Ok(json) = serde_json::to_string(&error_msg) {
-                                        let _ = sender.send(Message::Text(json)).await;
+                                        let mut sender_lock = sender.lock().await;
+                                        let _ = sender_lock.send(Message::Text(json)).await;
                                     }
                                 }
                             }
@@ -370,10 +390,11 @@ async fn handle_signaling_message(
     message: SignalingMessage,
     session_id: &str,
     adapter: &Arc<WebRTCAdapter>,
+    ws_sender: Arc<tokio::sync::Mutex<SplitSink<WebSocket, Message>>>,
 ) -> Result<Option<SignalingMessage>> {
     match message {
         SignalingMessage::RequestOffer => {
-            let sdp = adapter.handle_request_offer(session_id).await?;
+            let sdp = adapter.handle_request_offer(session_id, ws_sender).await?;
             Ok(Some(SignalingMessage::Offer { sdp }))
         }
         SignalingMessage::Answer { sdp } => {

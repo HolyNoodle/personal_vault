@@ -121,7 +121,7 @@ impl ApplicationLauncherService {
                 framerate: command.video_framerate,
                 codec: crate::domain::aggregates::VideoCodec::H264,
             },
-            application: "thunar".to_string(), // File manager for file explorer
+            application: "file-explorer".to_string(), // Custom Rust file explorer app
         };
         
         let video_result = self.create_session_handler.handle(

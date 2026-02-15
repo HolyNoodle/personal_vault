@@ -20,6 +20,14 @@ RUN apt-get update && apt-get install -y \
     libxcb-render0-dev \
     libxcb-shape0-dev \
     libxcb-xfixes0-dev \
+    libgtk-3-0 \
+    libx11-6 \
+    libxrandr2 \
+    libxi6 \
+    libxcursor1 \
+    libxinerama1 \
+    libxkbcommon-x11-0 \
+    libxkbcommon0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install cargo-watch for hot-reloading
@@ -28,15 +36,7 @@ RUN cargo install cargo-watch
 # Copy workspace structure
 COPY Cargo.toml ./
 COPY shared ./shared
-COPY backend/Cargo.toml backend/Cargo.lock* ./backend/
-
-# Create dummy main to cache dependencies (skip if project is minimal)
-# RUN mkdir src && \
-#     echo "fn main() {}" > src/main.rs && \
-#     cargo build && \
-#     rm -rf src
-
-# Copy source code
+COPY apps ./apps
 COPY backend ./backend
 
 # Expose port

@@ -158,9 +158,21 @@ impl XvfbManager {
         }
 
         // Build command based on application type
-        let mut cmd = Command::new(command);
+        let command_path = match command {
+            "file-explorer" => "/app/target/release/file-explorer",
+            _ => command,
+        };
+        
+        let mut cmd = Command::new(command_path);
         cmd.env("DISPLAY", display_str);
         cmd.env("DBUS_SESSION_BUS_ADDRESS", &dbus_address);
+        
+        // Pass IPC socket path to file-explorer
+        if command == "file-explorer" {
+            if let Ok(ipc_path) = std::env::var("IPC_SOCKET_PATH") {
+                cmd.env("IPC_SOCKET_PATH", ipc_path);
+            }
+        }
         
         // Application-specific arguments
         match command {
@@ -173,19 +185,45 @@ impl XvfbManager {
                 cmd.args(&["-geometry", &geometry, "-maximized", "-e", "top"]);
             },
             "thunar" => {
-                // Thunar doesn't need special args, just open to home directory
-                cmd.arg("/root");
+                // Open file manager to storage directory
+                cmd.arg("/data/storage");
+            },
+            "file-explorer" => {
+                // Custom Rust file explorer app - uses IPC for communication
+                // TODO: Implement IPC socket setup
             },
             _ => {
                 // For other apps, just run them as-is
             }
         }
         
-        let child = cmd
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+        let mut child = cmd
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
             .context(format!("Failed to launch {}. Make sure it's installed.", command))?;
+
+        // Log child process output for debugging
+        if let Some(stdout) = child.stdout.take() {
+            use tokio::io::AsyncBufReadExt;
+            let reader = tokio::io::BufReader::new(stdout);
+            tokio::spawn(async move {
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    tracing::info!("App stdout: {}", line);
+                }
+            });
+        }
+        if let Some(stderr) = child.stderr.take() {
+            use tokio::io::AsyncBufReadExt;
+            let reader = tokio::io::BufReader::new(stderr);
+            tokio::spawn(async move {
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    tracing::error!("App stderr: {}", line);
+                }
+            });
+        }
 
         // Store the child process to keep it alive
         let mut displays = self.displays.write().await;

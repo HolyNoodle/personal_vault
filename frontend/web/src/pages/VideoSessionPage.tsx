@@ -59,7 +59,7 @@ export const VideoSessionPage: React.FC = () => {
         user_id: user.id,
         width: finalWidth,
         height: finalHeight,
-        framerate: 30,
+        framerate: 15,
         application: 'xterm',
       })
 
@@ -92,85 +92,57 @@ export const VideoSessionPage: React.FC = () => {
   }
 
   return (
-    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      <Paper sx={{ p: 3 }}>
-        <Typography variant="h4" gutterBottom>
-          Video Session
-        </Typography>
-        <Typography variant="body2" color="text.secondary" paragraph>
-          Stream applications in an isolated sandbox environment
-        </Typography>
+    <Box sx={{ 
+      width: '100%',
+      height: '100%', 
+      display: 'flex', 
+      flexDirection: 'column',
+      bgcolor: '#000',
+      overflow: 'hidden',
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0
+    }}>
+      {/* Error display */}
+      {error && (
+        <Alert 
+          severity="error" 
+          onClose={() => setError(null)}
+          sx={{ position: 'absolute', top: 8, left: 8, right: 8, zIndex: 1000 }}
+        >
+          {error}
+        </Alert>
+      )}
 
-        {error && (
-          <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
-            {error}
-          </Alert>
-        )}
-
-        <Box sx={{ mb: 3, display: 'flex', gap: 2, alignItems: 'center' }}>
-          {!sessionId ? (
-            <Button
-              variant="contained"
-              color="primary"
-              startIcon={loading ? <CircularProgress size={20} /> : <VideoCallIcon />}
-              onClick={handleStartSession}
-              disabled={loading}
-              size="large"
-            >
-              {loading ? 'Starting...' : 'Start Video Session'}
-            </Button>
-          ) : (
-            <Button
-              variant="contained"
-              color="error"
-              startIcon={<StopCircleIcon />}
-              onClick={handleStopSession}
-              disabled={loading}
-              size="large"
-            >
-              Stop Session
-            </Button>
-          )}
-
-          {sessionId && (
-            <Card variant="outlined" sx={{ flex: 1 }}>
-              <CardContent>
-                <Typography variant="caption" color="text.secondary">
-                  Session ID
-                </Typography>
-                <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-                  {sessionId}
-                </Typography>
-                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                  Connection: {connectionState}
-                </Typography>
-              </CardContent>
-            </Card>
-          )}
-        </Box>
-
-        {websocketUrl && (
-          <Paper elevation={3} sx={{ p: 0, overflow: 'hidden' }}>
-            <VideoPlayer
-              websocketUrl={websocketUrl}
-              onConnectionStateChange={(state) => setConnectionState(state)}
-              onError={(err) => setError(err)}
-            />
-          </Paper>
-        )}
-
-        {!sessionId && !loading && (
-          <Box sx={{ textAlign: 'center', py: 8 }}>
+      {/* Full-height video container */}
+      <Box sx={{ flex: 1, display: 'flex', overflow: 'hidden', bgcolor: '#000' }}>
+        {websocketUrl ? (
+          <VideoPlayer
+            websocketUrl={websocketUrl}
+            onConnectionStateChange={(state) => setConnectionState(state)}
+            onError={(err) => setError(err)}
+          />
+        ) : (
+          <Box sx={{ 
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center', 
+            justifyContent: 'center',
+            bgcolor: 'background.paper'
+          }}>
             <VideoCallIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
             <Typography variant="h6" color="text.secondary">
               No active session
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Click "Start Video Session" to begin
+              Click "Start Session" to begin
             </Typography>
           </Box>
         )}
-      </Paper>
-    </Container>
+      </Box>
+    </Box>
   )
 }

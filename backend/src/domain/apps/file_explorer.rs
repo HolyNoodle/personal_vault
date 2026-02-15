@@ -42,8 +42,8 @@ impl FileExplorerApp {
 
     /// Get sandboxed binary path
     pub fn binary_path(&self) -> &str {
-        // This would be a Rust binary using egui or headless browser
-        "/opt/sandbox-apps/file-explorer/bin/file_explorer"
+        // Custom Rust file explorer using egui (built in workspace target)
+        "/app/target/release/file-explorer"
     }
 
     /// Validate file path is within allowed paths

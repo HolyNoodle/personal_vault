@@ -8,7 +8,6 @@ import { Layout } from './components/Layout'
 import { LoginPage } from './pages/LoginPage'
 import { ApplicationsPage } from './pages/ApplicationsPage'
 import { LaunchApplicationPage } from './pages/LaunchApplicationPage'
-import { FilesPage } from './pages/FilesPage'
 import { SessionsPage } from './pages/SessionsPage'
 import { VideoSessionPage } from './pages/VideoSessionPage'
 import SetupPage from './pages/SetupPage'
@@ -73,7 +72,6 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/applications" element={<ProtectedRoute><ApplicationsPage /></ProtectedRoute>} />
           <Route path="/launch" element={<ProtectedRoute><LaunchApplicationPage /></ProtectedRoute>} />
-          <Route path="/files" element={<ProtectedRoute><FilesPage /></ProtectedRoute>} />
           <Route path="/sessions" element={<ProtectedRoute><SessionsPage /></ProtectedRoute>} />
           <Route path="/video" element={<ProtectedRoute><VideoSessionPage /></ProtectedRoute>} />
           <Route path="/" element={<ProtectedRoute><ApplicationsPage /></ProtectedRoute>} />

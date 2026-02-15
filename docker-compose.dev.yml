@@ -52,7 +52,7 @@ services:
     ports:
       - "3478:3478/udp"
       - "3478:3478/tcp"
-      - "49152-65535:49152-65535/udp"  # TURN relay ports
+      - "49152-49161:49152-49161/udp"  # TURN relay ports (10 ports)
     command:
       - "turnserver"
       - "--listening-port=3478"
@@ -63,8 +63,16 @@ services:
       - "--log-file=stdout"
       - "--verbose"
       - "--min-port=49152"
-      - "--max-port=65535"
+      - "--max-port=49161"
       - "--external-ip=127.0.0.1"
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
 
   # Rust Backend (Development)
   backend:
@@ -89,10 +97,10 @@ services:
       - ./shared:/app/shared
       - ./apps:/app/apps
       - ./Cargo.toml:/app/Cargo.toml
-      - ./storage:/data/storage
+      - ./target:/app/target
+      - /home/holynoodle/Downloads:/data/storage
       - ipc_socket:/tmp/ipc
       - cargo_cache:/usr/local/cargo/registry
-      - target_cache:/app/target
     depends_on:
       postgres:
         condition: service_healthy
@@ -116,6 +124,14 @@ services:
       - ./frontend/web:/app
       - /app/node_modules
     command: npm run dev -- --host 0.0.0.0
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
 volumes:
   postgres_data:
