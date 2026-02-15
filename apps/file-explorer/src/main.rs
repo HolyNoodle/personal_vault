@@ -393,7 +393,8 @@ async fn main() -> Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1920.0, 1080.0])
             .with_title("File Explorer")
-            .with_maximized(true),
+            .with_decorations(false)
+            .with_fullscreen(true),
         ..Default::default()
     };
 
