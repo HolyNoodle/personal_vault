@@ -46,13 +46,13 @@ impl CreateSessionHandler {
         }
     }
 
-    pub async fn handle(&self, command: CreateSessionCommand, webrtc_adapter: Arc<WebRTCAdapter>) -> Result<CreateSessionResult> {
+    pub async fn handle(&self, command: CreateSessionCommand, _webrtc_adapter: Arc<WebRTCAdapter>) -> Result<CreateSessionResult> {
         // Validate config
         command.config.validate()
             .map_err(|e| anyhow::anyhow!("Invalid video config: {}", e))?;
 
         // Create domain object
-        let mut session = VideoSession::new(command.user_id, command.config.clone());
+        let session = VideoSession::new(command.user_id, command.config.clone());
 
         // Sandbox, streaming, and repository features disabled (trait methods removed)
 
@@ -89,7 +89,7 @@ impl TerminateSessionHandler {
         }
     }
 
-    pub async fn handle(&self, command: TerminateSessionCommand) -> Result<()> {
+    pub async fn handle(&self, _command: TerminateSessionCommand) -> Result<()> {
         // Terminate session features disabled (trait methods removed)
         Ok(())
     }

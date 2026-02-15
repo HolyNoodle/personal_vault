@@ -18,7 +18,7 @@ pub async fn execute(
     
     // Find user by email
     // User lookup disabled (user_repo removed)
-    let user: Option<&str> = None;
+    // Removed unused variable user
     
     // Get user's credentials
     let credentials: Vec<&str> = vec![];

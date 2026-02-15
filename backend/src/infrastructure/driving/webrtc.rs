@@ -69,24 +69,21 @@ pub struct WebRTCAdapter {
     cancel_tokens: Arc<RwLock<HashMap<String, CancellationToken>>>,
     ffmpeg_handles: Arc<RwLock<HashMap<String, ChildStdout>>>,
     input_manager: Arc<X11InputManager>,
-    ffmpeg_manager: Arc<crate::infrastructure::driven::FfmpegManager>,
+    // Removed unused field ffmpeg_manager
 }
 
 impl WebRTCAdapter {
-    pub fn new(ffmpeg_manager: Arc<crate::infrastructure::driven::FfmpegManager>) -> Self {
+    pub fn new() -> Self {
         Self {
             peers: Arc::new(RwLock::new(HashMap::new())),
             tracks: Arc::new(RwLock::new(HashMap::new())),
             cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
             ffmpeg_handles: Arc::new(RwLock::new(HashMap::new())),
             input_manager: Arc::new(X11InputManager::new()),
-            ffmpeg_manager,
+            // ffmpeg_manager removed
         }
     }
     
-    pub async fn register_input_session(&self, session_id: String, display: String) {
-        self.input_manager.register_session(session_id, display).await;
-    }
 
     async fn create_peer_connection(&self, session_id: &str, ws_sender: Arc<tokio::sync::Mutex<SplitSink<WebSocket, Message>>>) -> Result<(Arc<RTCPeerConnection>, Arc<TrackLocalStaticSample>)> {
         // Create media engine
@@ -291,10 +288,6 @@ impl WebRTCAdapter {
         }
     
     /// Store FFmpeg stdout handle and start streaming when peer connects
-    pub async fn set_ffmpeg_stream(&self, session_id: String, ffmpeg_stdout: ChildStdout) {
-        let mut handles = self.ffmpeg_handles.write().await;
-        handles.insert(session_id, ffmpeg_stdout);
-    }
 
     pub async fn cleanup(&self, session_id: &str) -> Result<()> {
         info!("Cleaning up WebRTC resources for session: {}", session_id);
@@ -313,8 +306,7 @@ impl WebRTCAdapter {
         drop(handles);
 
         // Explicitly stop FFmpeg encoder for this session
-        use crate::domain::aggregates::VideoSessionId;
-        let session_id_obj = VideoSessionId::from_string(session_id.to_string());
+        // use crate::domain::aggregates::VideoSessionId; // removed unused import
             // FFmpeg stop_session feature disabled (method removed)
 
         // Stop application (X11 input session)

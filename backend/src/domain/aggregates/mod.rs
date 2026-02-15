@@ -10,7 +10,7 @@ pub use video_session::{VideoSession, VideoSessionId, VideoConfig, VideoCodec};
 
 // New application-centric model
 pub use application_session::{
-    ApplicationSession, SessionId, AppId, SandboxedExecution,
+    ApplicationSession, AppId, SandboxedExecution,
     VideoConfig as AppVideoConfig, VideoCodec as AppVideoCodec, 
     SandboxConstraints, ResourceLimits,
 };

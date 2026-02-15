@@ -84,7 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let streaming = Arc::new(FfmpegManager::new());
 
     // Pass ffmpeg_manager to WebRTCAdapter
-    let _webrtc_adapter = Arc::new(WebRTCAdapter::new(streaming.clone()));
+    let _webrtc_adapter = Arc::new(WebRTCAdapter::new());
     
     // Initialize application layer (command handlers)
     let create_session_handler = Arc::new(CreateSessionHandler::new(
@@ -100,7 +100,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     
     // Initialize driving adapters (needed by application platform)
-    let webrtc_adapter = Arc::new(WebRTCAdapter::new(streaming.clone()));
+    let webrtc_adapter = Arc::new(WebRTCAdapter::new());
     
     // Initialize APPLICATION PLATFORM infrastructure
     // Removed initialization of deleted trait objects and ApplicationLauncherService::new with deleted fields

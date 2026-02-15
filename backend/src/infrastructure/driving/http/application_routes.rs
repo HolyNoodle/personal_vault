@@ -1,15 +1,8 @@
 use axum::response::IntoResponse;
 use axum::http::StatusCode;
 // ...existing code...
-use axum::{
-    extract::{Json, State},
-// Removed stray closing delimiter
-// Removed orphaned serde import
-// Removed unused imports and orphaned code
-};
-use axum::{
-    // ...existing code...
-};
+// ...existing code...
+// ...existing code...
 
 /// HTTP handler state for application routes
 #[derive(Clone)]
