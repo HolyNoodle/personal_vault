@@ -231,96 +231,93 @@ impl eframe::App for FileExplorerApp {
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            // Header with path and navigation
-            ui.horizontal(|ui| {
-                if ui.button("⬆ Up").clicked() {
-                    self.go_up();
-                }
-                ui.label(format!("📁 {}", self.current_path.display()));
-            });
-
-            ui.separator();
-
-            // Error message
-            if let Some(ref error) = self.error_message {
-                ui.colored_label(egui::Color32::RED, error);
-                ui.separator();
-            }
-
-            // File list
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                let mut navigate_to = None;
-                let mut new_selection = None;
-
-                for (idx, item) in self.items.iter().enumerate() {
-                    let is_selected = self.selected_index == Some(idx);
-                    let icon = if item.is_dir { "📁" } else { "📄" };
-
-                    let response = ui.selectable_label(
-                        is_selected,
-                        format!(
-                            "{} {} {}",
-                            icon,
-                            item.name,
-                            if item.is_dir {
-                                String::new()
-                            } else {
-                                format!("({} bytes)", item.size)
+            // Split view: left = file/folder list, right = file preview
+            ui.columns(2, |columns| {
+                // LEFT PANEL: File/folder list and navigation
+                columns[0].vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        // Only show up button if not at root
+                        let root = PathBuf::from("/data/storage");
+                        if self.current_path != root {
+                            if ui.button("⬆ Up").clicked() {
+                                self.go_up();
                             }
-                        ),
-                    );
-
-                    if response.clicked() {
-                        if is_selected && item.is_dir {
-                            // Double-click to navigate into directory
-                            navigate_to = Some(item.path.clone());
+                        }
+                        // Show path as / if at root, else relative
+                        let path_display = if self.current_path == root {
+                            "/".to_string()
                         } else {
-                            new_selection = Some(idx);
+                            self.current_path.strip_prefix(&root)
+                                .map(|p| format!("/{}", p.display()))
+                                .unwrap_or_else(|_| self.current_path.display().to_string())
+                        };
+                        ui.label(format!("📁 {}", path_display));
+                    });
+                    ui.separator();
+                    if let Some(ref error) = self.error_message {
+                        ui.colored_label(egui::Color32::RED, error);
+                        ui.separator();
+                    }
+                    egui::ScrollArea::vertical()
+                        .auto_shrink(false)
+                        .enable_scrolling(true)
+                        .show(ui, |ui| {
+                        let mut navigate_to = None;
+                        let mut new_selection: Option<usize> = None;
+                        for (idx, item) in self.items.iter().enumerate() {
+                            let is_selected = self.selected_index == Some(idx);
+                            let icon = if item.is_dir { "📁" } else { "📄" };
+                            let response = ui.selectable_label(
+                                is_selected,
+                                format!(
+                                    "{} {} {}",
+                                    icon,
+                                    item.name,
+                                    if item.is_dir {
+                                        String::new()
+                                    } else {
+                                        format!("({} bytes)", item.size)
+                                    }
+                                ),
+                            );
+                            if response.clicked() {
+                                if item.is_dir {
+                                    self.selected_index = Some(idx);
+                                    navigate_to = Some(item.path.clone());
+                                } else {
+                                    self.selected_index = Some(idx);
+                                }
+                            }
                         }
-                    }
-                }
-
-                // Apply navigation/selection after iteration
-                if let Some(path) = navigate_to {
-                    self.navigate_to(path);
-                } else if let Some(idx) = new_selection {
-                    self.selected_index = Some(idx);
-                    self.refresh_directory(); // Update contextual actions
-                }
-            });
-
-            ui.separator();
-
-            // Action buttons (contextual)
-            ui.horizontal(|ui| {
-                let actions = self.get_contextual_actions();
-
-                if actions.contains(&"upload".to_string()) {
-                    if ui.button("📤 Upload").clicked() {
-                        let _ = self.tx.send(AppMessage::Log {
-                            level: shared::LogLevel::Info,
-                            message: "User clicked upload button".to_string(),
-                        });
-                    }
-                }
-
-                if actions.contains(&"download".to_string()) {
-                    if ui.button("📥 Download").clicked() {
-                        let _ = self.tx.send(AppMessage::Log {
-                            level: shared::LogLevel::Info,
-                            message: "User clicked download button".to_string(),
-                        });
-                    }
-                }
-
-                if actions.contains(&"delete".to_string()) {
-                    if ui.button("🗑 Delete").clicked() {
-                        if self.selected_index.is_some() {
-                            // Send delete request
-                            self.handle_platform_message(PlatformMessage::Delete);
+                        if let Some(path) = navigate_to {
+                            self.navigate_to(path);
                         }
+                    });
+                });
+                // RIGHT PANEL: File preview
+                columns[1].vertical(|ui| {
+                    ui.heading("Preview");
+                    ui.separator();
+                    if let Some(idx) = self.selected_index {
+                        let item = &self.items[idx];
+                        if !item.is_dir {
+                            match std::fs::read_to_string(&item.path) {
+                                Ok(text) => {
+                                    egui::ScrollArea::vertical().show(ui, |ui| {
+                                        ui.code(text);
+                                    });
+                                }
+                                Err(e) => {
+                                    ui.colored_label(egui::Color32::RED, format!("Failed to preview file: {}", e));
+                                }
+                            }
+                        } else {
+                            ui.label("Select a file to preview its contents.");
+                        }
+                    } else {
+                        ui.label("Select a file to preview its contents.");
                     }
-                }
+                });
             });
         });
     }
