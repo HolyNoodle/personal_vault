@@ -1,5 +1,5 @@
 # Build frontend
-FROM node:20-alpine AS frontend-builder
+FROM node:24-alpine AS frontend-builder
 
 WORKDIR /app/frontend/web
 
@@ -10,7 +10,7 @@ COPY frontend/web/ ./
 RUN npm run build
 
 # Build backend
-FROM rust:1.75-slim AS backend-builder
+FROM rust:1.93-slim AS backend-builder
 
 WORKDIR /app
 
@@ -51,6 +51,8 @@ RUN apt-get update && apt-get install -y \
     wmctrl \
     openbox \
     xdotool \
+    libxkbcommon-x11-0 \
+    libxkbcommon0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app user
