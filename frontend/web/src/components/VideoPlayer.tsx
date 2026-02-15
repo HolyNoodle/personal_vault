@@ -5,6 +5,8 @@ export interface SignalingMessage {
   type: string
   sdp?: string
   candidate?: string
+  sdpMid?: string | null
+  sdpMLineIndex?: number | null
 }
 
 interface VideoPlayerProps {
@@ -136,7 +138,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 // Add server's ICE candidate
                 if (message.candidate) {
                   await peerConnection.addIceCandidate(
-                    new RTCIceCandidate({ candidate: message.candidate })
+                    new RTCIceCandidate({
+                      candidate: message.candidate,
+                      sdpMid: message.sdpMid ?? null,
+                      sdpMLineIndex: message.sdpMLineIndex ?? null
+                    })
                   )
                 }
                 break

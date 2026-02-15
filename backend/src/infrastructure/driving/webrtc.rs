@@ -44,12 +44,19 @@ pub enum SignalingMessage {
     RequestOffer,
     Offer { sdp: String },
     Answer { sdp: String },
-    IceCandidate { candidate: String },
+    IceCandidate {
+        candidate: String,
+        #[serde(rename = "sdpMid")]
+        sdp_mid: Option<String>,
+        #[serde(rename = "sdpMLineIndex")]
+        sdp_mline_index: Option<u16>,
+    },
     MouseMove { x: i32, y: i32 },
     MouseDown { button: u8 },
     MouseUp { button: u8 },
     KeyDown { key: String, code: String },
     KeyUp { key: String, code: String },
+    Resize { width: u32, height: u32 },
     Error { message: String },
 }
 
@@ -179,11 +186,21 @@ impl WebRTCAdapter {
             let sender = Arc::clone(&ws_sender_clone);
             Box::pin(async move {
                 if let Some(candidate) = candidate {
-                    let candidate_str = candidate.to_json().await.unwrap_or_default().candidate;
-                    let msg = SignalingMessage::IceCandidate { candidate: candidate_str };
-                    if let Ok(json) = serde_json::to_string(&msg) {
-                        let mut sender_lock = sender.lock().await;
-                        let _ = sender_lock.send(Message::Text(json)).await;
+                    match candidate.to_json() {
+                        Ok(json_candidate) => {
+                            let msg = SignalingMessage::IceCandidate {
+                                candidate: json_candidate.candidate,
+                                sdp_mid: json_candidate.sdp_mid,
+                                sdp_mline_index: json_candidate.sdp_mline_index.map(|v| v as u16),
+                            };
+                            if let Ok(json) = serde_json::to_string(&msg) {
+                                let mut sender_lock = sender.lock().await;
+                                let _ = sender_lock.send(Message::Text(json)).await;
+                            }
+                        }
+                        Err(e) => {
+                            warn!("Failed to serialize ICE candidate: {}", e);
+                        }
                     }
                 }
             })
@@ -248,24 +265,26 @@ impl WebRTCAdapter {
         Ok(())
     }
 
-    async fn handle_ice_candidate(&self, session_id: &str, candidate: String) -> Result<()> {
-        debug!("Received ICE candidate from client for session: {}", session_id);
+        async fn handle_ice_candidate(&self, session_id: &str, candidate: String, sdp_mid: Option<String>, sdp_mline_index: Option<u16>) -> Result<()> {
+            debug!("Received ICE candidate from client for session: {}", session_id);
         
-        let peers = self.peers.read().await;
-        if let Some(pc) = peers.get(session_id) {
-            use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
-            let ice_candidate = RTCIceCandidateInit {
-                candidate,
-                ..Default::default()
-            };
-            pc.add_ice_candidate(ice_candidate).await?;
-            debug!("Added ICE candidate for session: {}", session_id);
-        } else {
-            return Err(anyhow::anyhow!("Peer connection not found"));
+            let peers = self.peers.read().await;
+            if let Some(pc) = peers.get(session_id) {
+                use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
+                let ice_candidate = RTCIceCandidateInit {
+                    candidate,
+                    sdp_mid,
+                    sdp_mline_index,
+                    ..Default::default()
+                };
+                pc.add_ice_candidate(ice_candidate).await?;
+                debug!("Added ICE candidate for session: {}", session_id);
+            } else {
+                return Err(anyhow::anyhow!("Peer connection not found"));
+            }
+        
+            Ok(())
         }
-        
-        Ok(())
-    }
     
     /// Store FFmpeg stdout handle and start streaming when peer connects
     pub async fn set_ffmpeg_stream(&self, session_id: String, ffmpeg_stdout: ChildStdout) {
@@ -393,6 +412,11 @@ async fn handle_signaling_message(
     ws_sender: Arc<tokio::sync::Mutex<SplitSink<WebSocket, Message>>>,
 ) -> Result<Option<SignalingMessage>> {
     match message {
+                SignalingMessage::Resize { width, height } => {
+                    info!("Received Resize: width={}, height={}", width, height);
+                    // TODO: Implement resize handling if needed
+                    Ok(None)
+                }
         SignalingMessage::RequestOffer => {
             let sdp = adapter.handle_request_offer(session_id, ws_sender).await?;
             Ok(Some(SignalingMessage::Offer { sdp }))
@@ -401,8 +425,8 @@ async fn handle_signaling_message(
             adapter.handle_answer(session_id, sdp).await?;
             Ok(None)
         }
-        SignalingMessage::IceCandidate { candidate } => {
-            adapter.handle_ice_candidate(session_id, candidate).await?;
+        SignalingMessage::IceCandidate { candidate, sdp_mid, sdp_mline_index } => {
+            adapter.handle_ice_candidate(session_id, candidate, sdp_mid, sdp_mline_index).await?;
             Ok(None)
         }
         SignalingMessage::MouseMove { x, y } => {

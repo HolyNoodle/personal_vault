@@ -31,7 +31,7 @@ export function LaunchApplicationPage() {
   const [newPath, setNewPath] = useState('');
   const [videoWidth, setVideoWidth] = useState(1920);
   const [videoHeight, setVideoHeight] = useState(1080);
-  const [videoFramerate, setVideoFramerate] = useState(30);
+  const [videoFramerate, setVideoFramerate] = useState(15);
   const [enableWatermarking, setEnableWatermarking] = useState(false);
   const [timeoutMinutes, setTimeoutMinutes] = useState(60);
   const [error, setError] = useState<string | null>(null);

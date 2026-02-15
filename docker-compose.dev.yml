@@ -89,14 +89,11 @@ services:
       - WEBAUTHN_RP_ID=localhost
       - WEBAUTHN_ORIGIN=http://localhost:5173
       - IPC_SOCKET_PATH=/tmp/ipc/sandbox-ipc.sock
-      - TURN_SERVER=turn:localhost:3478
+      - TURN_SERVER=turn:sandbox-coturn-dev:3478
       - TURN_USERNAME=sandbox
       - TURN_CREDENTIAL=dev_turn_secret
     volumes:
-      - ./backend:/app/backend
-      - ./shared:/app/shared
-      - ./apps:/app/apps
-      - ./Cargo.toml:/app/Cargo.toml
+      - ./:/app
       - ./target:/app/target
       - /home/holynoodle/Downloads:/data/storage
       - ipc_socket:/tmp/ipc
