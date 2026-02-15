@@ -13,6 +13,30 @@ pub struct X11InputManager {
 }
 
 impl X11InputManager {
+        pub async fn handle_mouse_scroll(&self, session_id: &str, delta_y: f32) -> Result<()> {
+            tracing::info!("Mouse scroll: session={}, delta_y={}", session_id, delta_y);
+            let conn = {
+                let connections = self.connections.read().await;
+                connections.get(session_id).cloned()
+            };
+
+            if let Some(conn) = conn {
+                // Normalize scroll direction and sensitivity
+                let normalized_delta = -delta_y / 150.0; // Reverse and scale for less sensitivity
+                let button = if normalized_delta > 0.0 { 4 } else { 5 }; // 4 = scroll up, 5 = scroll down
+                let count = normalized_delta.abs().round() as u8;
+                tokio::task::spawn_blocking(move || {
+                    for _ in 0..count {
+                        let _ = xtest::fake_input(&*conn, 4, button, 0, x11rb::NONE, 0, 0, 0);
+                        let _ = xtest::fake_input(&*conn, 5, button, 0, x11rb::NONE, 0, 0, 0);
+                    }
+                    let _ = conn.flush();
+                });
+            } else {
+                tracing::warn!("No X11 connection found for session: {}", session_id);
+            }
+            Ok(())
+        }
     pub fn new() -> Self {
         Self {
             connections: Arc::new(RwLock::new(HashMap::new())),

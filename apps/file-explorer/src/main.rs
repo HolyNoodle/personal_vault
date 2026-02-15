@@ -263,7 +263,6 @@ impl eframe::App for FileExplorerApp {
                         .enable_scrolling(true)
                         .show(ui, |ui| {
                         let mut navigate_to = None;
-                        let mut new_selection: Option<usize> = None;
                         for (idx, item) in self.items.iter().enumerate() {
                             let is_selected = self.selected_index == Some(idx);
                             let icon = if item.is_dir { "📁" } else { "📄" };

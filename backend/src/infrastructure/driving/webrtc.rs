@@ -55,6 +55,7 @@ pub enum SignalingMessage {
     MouseMove { x: i32, y: i32 },
     MouseDown { button: u8 },
     MouseUp { button: u8 },
+    MouseScroll { delta_y: f32 },
     KeyDown { key: String, code: String },
     KeyUp { key: String, code: String },
     Resize { width: u32, height: u32 },
@@ -460,6 +461,11 @@ async fn handle_signaling_message(
         SignalingMessage::MouseUp { button } => {
             info!("Received MouseUp: button={}", button);
             let _ = adapter.input_manager.handle_mouse_up(session_id, button).await;
+            Ok(None)
+        }
+        SignalingMessage::MouseScroll { delta_y } => {
+            info!("Received MouseScroll: delta_y={}", delta_y);
+            let _ = adapter.input_manager.handle_mouse_scroll(session_id, delta_y).await;
             Ok(None)
         }
         SignalingMessage::KeyDown { key, .. } => {

@@ -305,6 +305,11 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     container.addEventListener('mouseup', handleMouseUp)
     container.addEventListener('keydown', handleKeyDown)
     container.addEventListener('keyup', handleKeyUp)
+    container.addEventListener('wheel', (e: WheelEvent) => {
+      e.preventDefault()
+      // Send MouseScroll signaling message
+      sendInput({ type: 'mouse-scroll', delta_y: e.deltaY })
+    })
     container.tabIndex = 0
     container.focus()
 
@@ -314,6 +319,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
       container.removeEventListener('mouseup', handleMouseUp)
       container.removeEventListener('keydown', handleKeyDown)
       container.removeEventListener('keyup', handleKeyUp)
+      container.removeEventListener('wheel', (e: WheelEvent) => {
+        e.preventDefault()
+        sendInput({ type: 'mouse-scroll', delta_y: e.deltaY })
+      })
     }
   }, [connectionState])
 
