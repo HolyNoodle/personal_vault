@@ -86,6 +86,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let session_repo = Arc::new(InMemoryVideoSessionRepository::new());
     let sandbox = Arc::new(XvfbManager::new());
     let streaming = Arc::new(FfmpegManager::new());
+
+    // Pass ffmpeg_manager to WebRTCAdapter
+    let webrtc_adapter = Arc::new(WebRTCAdapter::new(streaming.clone()));
     
     // Initialize application layer (command handlers)
     let create_session_handler = Arc::new(CreateSessionHandler::new(
@@ -101,7 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     
     // Initialize driving adapters (needed by application platform)
-    let webrtc_adapter = Arc::new(WebRTCAdapter::new());
+    let webrtc_adapter = Arc::new(WebRTCAdapter::new(streaming.clone()));
     
     // Initialize APPLICATION PLATFORM infrastructure
     let app_session_repo = Arc::new(InMemorySessionRepository::new());

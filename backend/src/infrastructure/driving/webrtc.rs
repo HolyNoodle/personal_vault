@@ -36,6 +36,7 @@ use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 use std::collections::HashMap;
 use crate::infrastructure::driven::input::x11_input::X11InputManager;
+use crate::application::ports::VideoStreamingPort;
 
 /// Signaling message types
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,16 +68,18 @@ pub struct WebRTCAdapter {
     cancel_tokens: Arc<RwLock<HashMap<String, CancellationToken>>>,
     ffmpeg_handles: Arc<RwLock<HashMap<String, ChildStdout>>>,
     input_manager: Arc<X11InputManager>,
+    ffmpeg_manager: Arc<crate::infrastructure::driven::FfmpegManager>,
 }
 
 impl WebRTCAdapter {
-    pub fn new() -> Self {
+    pub fn new(ffmpeg_manager: Arc<crate::infrastructure::driven::FfmpegManager>) -> Self {
         Self {
             peers: Arc::new(RwLock::new(HashMap::new())),
             tracks: Arc::new(RwLock::new(HashMap::new())),
             cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
             ffmpeg_handles: Arc::new(RwLock::new(HashMap::new())),
             input_manager: Arc::new(X11InputManager::new()),
+            ffmpeg_manager,
         }
     }
     
@@ -294,7 +297,7 @@ impl WebRTCAdapter {
 
     pub async fn cleanup(&self, session_id: &str) -> Result<()> {
         info!("Cleaning up WebRTC resources for session: {}", session_id);
-        
+
         // Cancel the frame sender task first
         let mut tokens = self.cancel_tokens.write().await;
         if let Some(token) = tokens.remove(session_id) {
@@ -302,21 +305,36 @@ impl WebRTCAdapter {
             info!("Cancelled frame sender for session: {}", session_id);
         }
         drop(tokens); // Release lock before cleanup
-        
+
         // Remove FFmpeg handle
         let mut handles = self.ffmpeg_handles.write().await;
         handles.remove(session_id);
         drop(handles);
-        
+
+        // Explicitly stop FFmpeg encoder for this session
+        use crate::domain::aggregates::VideoSessionId;
+        let session_id_obj = VideoSessionId::from_string(session_id.to_string());
+        if let Err(e) = self.ffmpeg_manager.stop_session(&session_id_obj).await {
+            error!("Failed to stop FFmpeg encoder for session {}: {}", session_id, e);
+        } else {
+            info!("Stopped FFmpeg encoder for session: {}", session_id);
+        }
+
+        // Stop application (X11 input session)
+        self.input_manager.unregister_session(session_id).await;
+
         let mut peers = self.peers.write().await;
         let mut tracks = self.tracks.write().await;
-        
+
+        // Remove ICE state and candidates by dropping peer connection
         if let Some(pc) = peers.remove(session_id) {
             pc.close().await?;
             info!("Closed peer connection for session: {}", session_id);
         }
         tracks.remove(session_id);
-        
+
+        // Optionally: Remove any other ICE-related state here if tracked separately
+
         Ok(())
     }
 }
