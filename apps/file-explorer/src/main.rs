@@ -24,6 +24,7 @@ struct FileItem {
 }
 
 struct FileExplorerApp {
+        search_query: String,
     current_path: PathBuf,
     items: Vec<FileItem>,
     selected_index: Option<usize>,
@@ -44,6 +45,7 @@ impl FileExplorerApp {
             error_message: None,
             tx,
             rx,
+            search_query: String::new(),
         };
         app.refresh_directory();
         app
@@ -254,6 +256,11 @@ impl eframe::App for FileExplorerApp {
                         ui.label(format!("📁 {}", path_display));
                     });
                     ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.label("🔍 Search:");
+                        ui.text_edit_singleline(&mut self.search_query);
+                    });
+                    ui.separator();
                     if let Some(ref error) = self.error_message {
                         ui.colored_label(egui::Color32::RED, error);
                         ui.separator();
@@ -264,6 +271,9 @@ impl eframe::App for FileExplorerApp {
                         .show(ui, |ui| {
                         let mut navigate_to = None;
                         for (idx, item) in self.items.iter().enumerate() {
+                            if !self.search_query.is_empty() && !item.name.to_lowercase().contains(&self.search_query.to_lowercase()) {
+                                continue;
+                            }
                             let is_selected = self.selected_index == Some(idx);
                             let icon = if item.is_dir { "📁" } else { "📄" };
                             let response = ui.selectable_label(
@@ -300,14 +310,40 @@ impl eframe::App for FileExplorerApp {
                     if let Some(idx) = self.selected_index {
                         let item = &self.items[idx];
                         if !item.is_dir {
-                            match std::fs::read_to_string(&item.path) {
-                                Ok(text) => {
-                                    egui::ScrollArea::vertical().show(ui, |ui| {
-                                        ui.code(text);
-                                    });
+                            let ext = item.path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                            match ext.as_str() {
+                                "png" | "jpg" | "jpeg" | "bmp" | "gif" => {
+                                    match image::open(&item.path) {
+                                        Ok(img) => {
+                                            let img = img.to_rgba8();
+                                            let size = [img.width() as usize, img.height() as usize];
+                                            let pixels = img.into_raw();
+                                            let color_image = egui::ColorImage::from_rgba_unmultiplied(size, &pixels);
+                                            let texture = ui.ctx().load_texture("preview", color_image, egui::TextureOptions::default());
+                                            ui.image(&texture);
+                                        }
+                                        Err(e) => {
+                                            ui.colored_label(egui::Color32::RED, format!("Failed to load image: {}", e));
+                                        }
+                                    }
                                 }
-                                Err(e) => {
-                                    ui.colored_label(egui::Color32::RED, format!("Failed to preview file: {}", e));
+                                "mp4" | "webm" | "mkv" | "avi" => {
+                                    ui.label("Video preview not supported in native egui. Download to view.");
+                                }
+                                "pdf" => {
+                                    ui.label("PDF preview not supported in native egui. Download to view.");
+                                }
+                                _ => {
+                                    match std::fs::read_to_string(&item.path) {
+                                        Ok(text) => {
+                                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                                ui.code(text);
+                                            });
+                                        }
+                                        Err(e) => {
+                                            ui.colored_label(egui::Color32::RED, format!("Failed to preview file: {}", e));
+                                        }
+                                    }
                                 }
                             }
                         } else {
