@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 use webrtc::{
     api::{media_engine::MediaEngine, APIBuilder},
@@ -522,6 +522,9 @@ async fn handle_signaling_message(
         }
         SignalingMessage::Resize { width, height } => {
             info!("Received Resize: width={}, height={}", width, height);
+            // If you need to update the running session, call a method here, e.g.:
+            // adapter.wasm_manager.set_resolution(session_id, width, height).await;
+            // If you need to update framerate, add it to the message and handle accordingly.
             Ok(None)
         }
         _ => Ok(None),

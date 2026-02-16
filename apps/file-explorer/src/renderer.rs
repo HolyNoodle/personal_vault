@@ -4,11 +4,15 @@ use epaint::{ClippedPrimitive, Primitive};
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
 
-const WIDTH: usize = 800;
-const HEIGHT: usize = 600;
-const BUFFER_SIZE: usize = WIDTH * HEIGHT * 4; // RGBA8
+static WIDTH: Lazy<Mutex<usize>> = Lazy::new(|| Mutex::new(800));
+static HEIGHT: Lazy<Mutex<usize>> = Lazy::new(|| Mutex::new(600));
+static FRAMERATE: Lazy<Mutex<u32>> = Lazy::new(|| Mutex::new(30));
 
-static FRAMEBUFFER: Lazy<Mutex<Vec<u8>>> = Lazy::new(|| Mutex::new(vec![0u8; BUFFER_SIZE]));
+fn framebuffer_size() -> usize {
+    *WIDTH.lock().unwrap() * *HEIGHT.lock().unwrap() * 4
+}
+
+static FRAMEBUFFER: Lazy<Mutex<Vec<u8>>> = Lazy::new(|| Mutex::new(vec![0u8; 800 * 600 * 4]));
 static APP: Lazy<Mutex<FileExplorerApp>> = Lazy::new(|| Mutex::new(create_file_explorer_app()));
 static CTX: Lazy<egui::Context> = Lazy::new(egui::Context::default);
 
@@ -27,9 +31,11 @@ pub extern "C" fn render_file_explorer_frame() {
 
     // Build raw input with current pointer state
     let mut raw_input = egui::RawInput::default();
+    let width = *WIDTH.lock().unwrap();
+    let height = *HEIGHT.lock().unwrap();
     raw_input.screen_rect = Some(egui::Rect::from_min_size(
         egui::Pos2::ZERO,
-        egui::vec2(WIDTH as f32, HEIGHT as f32),
+        egui::vec2(width as f32, height as f32),
     ));
     raw_input.events.push(egui::Event::PointerMoved(pointer_pos));
     if pointer_pressed {
@@ -81,6 +87,8 @@ pub extern "C" fn render_file_explorer_frame() {
 
     for cp in &clipped_primitives {
         let clip = cp.clip_rect;
+        let width = *WIDTH.lock().unwrap();
+        let height = *HEIGHT.lock().unwrap();
         match &cp.primitive {
             Primitive::Mesh(mesh) => {
                 // Rasterize each triangle in the mesh
@@ -94,9 +102,9 @@ pub extern "C" fn render_file_explorer_frame() {
 
                     // Compute bounding box
                     let min_x = v0.pos.x.min(v1.pos.x).min(v2.pos.x).max(clip.min.x).max(0.0) as i32;
-                    let max_x = v0.pos.x.max(v1.pos.x).max(v2.pos.x).min(clip.max.x).min(WIDTH as f32 - 1.0) as i32;
+                    let max_x = v0.pos.x.max(v1.pos.x).max(v2.pos.x).min(clip.max.x).min(width as f32 - 1.0) as i32;
                     let min_y = v0.pos.y.min(v1.pos.y).min(v2.pos.y).max(clip.min.y).max(0.0) as i32;
-                    let max_y = v0.pos.y.max(v1.pos.y).max(v2.pos.y).min(clip.max.y).min(HEIGHT as f32 - 1.0) as i32;
+                    let max_y = v0.pos.y.max(v1.pos.y).max(v2.pos.y).min(clip.max.y).min(height as f32 - 1.0) as i32;
 
                     for py in min_y..=max_y {
                         for px in min_x..=max_x {
@@ -139,7 +147,7 @@ pub extern "C" fn render_file_explorer_frame() {
                                 continue; // Skip nearly transparent
                             }
 
-                            let idx = (py as usize * WIDTH + px as usize) * 4;
+                            let idx = (py as usize * width + px as usize) * 4;
                             if idx + 3 >= fb.len() {
                                 continue;
                             }
@@ -189,6 +197,7 @@ fn barycentric(p: egui::Pos2, a: egui::Pos2, b: egui::Pos2, c: egui::Pos2) -> (f
     (w0, w1, w2)
 }
 
+
 #[no_mangle]
 pub extern "C" fn get_framebuffer_ptr() -> *const u8 {
     FRAMEBUFFER.lock().unwrap().as_ptr()
@@ -196,17 +205,50 @@ pub extern "C" fn get_framebuffer_ptr() -> *const u8 {
 
 #[no_mangle]
 pub extern "C" fn get_framebuffer_size() -> usize {
-    BUFFER_SIZE
+    framebuffer_size()
 }
 
 #[no_mangle]
 pub extern "C" fn get_width() -> u32 {
-    WIDTH as u32
+    *WIDTH.lock().unwrap() as u32
 }
 
 #[no_mangle]
 pub extern "C" fn get_height() -> u32 {
-    HEIGHT as u32
+    *HEIGHT.lock().unwrap() as u32
+}
+
+#[no_mangle]
+pub extern "C" fn get_framerate() -> u32 {
+    *FRAMERATE.lock().unwrap()
+}
+
+#[no_mangle]
+pub extern "C" fn set_width(w: i32) {
+    let mut width = WIDTH.lock().unwrap();
+    let mut fb = FRAMEBUFFER.lock().unwrap();
+    if *width != w as usize && w > 0 {
+        *width = w as usize;
+        fb.resize(*width * *HEIGHT.lock().unwrap() * 4, 0);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn set_height(h: i32) {
+    let mut height = HEIGHT.lock().unwrap();
+    let mut fb = FRAMEBUFFER.lock().unwrap();
+    if *height != h as usize && h > 0 {
+        *height = h as usize;
+        fb.resize(*WIDTH.lock().unwrap() * *height * 4, 0);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn set_framerate(fps: i32) {
+    let mut fr = FRAMERATE.lock().unwrap();
+    if fps > 0 {
+        *fr = fps as u32;
+    }
 }
 
 #[no_mangle]

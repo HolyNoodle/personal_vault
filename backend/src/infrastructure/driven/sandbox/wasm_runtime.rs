@@ -72,8 +72,11 @@ impl WasmAppManager {
 
         // Spawn the render loop in a blocking thread (wasmtime is synchronous)
         tokio::spawn(async move {
+            let width = width as u32;
+            let height = height as u32;
+            let framerate = framerate as u8;
             let result = tokio::task::spawn_blocking(move || {
-                run_wasm_render_loop(&wasm_path, frame_tx, token, frame_interval, &session_id_owned)
+                run_wasm_render_loop(&wasm_path, frame_tx, token, frame_interval, &session_id_owned, width, height, framerate)
             })
             .await;
 
@@ -120,6 +123,9 @@ fn run_wasm_render_loop(
     cancel_token: CancellationToken,
     frame_interval: std::time::Duration,
     session_id: &str,
+    width: u32,
+    height: u32,
+    framerate: u8,
 ) -> Result<()> {
     // Create wasmtime engine and store
     let engine = Engine::default();
@@ -135,6 +141,7 @@ fn run_wasm_render_loop(
         .instantiate(&mut store, &module)
         .context("Failed to instantiate WASM module")?;
 
+
     // Get exported functions
     let render_frame = instance
         .get_typed_func::<(), ()>(&mut store, "render_file_explorer_frame")
@@ -147,6 +154,22 @@ fn run_wasm_render_loop(
     let get_fb_size = instance
         .get_typed_func::<(), i32>(&mut store, "get_framebuffer_size")
         .context("Missing export: get_framebuffer_size")?;
+
+    // Try to get exported setters for width/height/framerate if present
+    let set_width = instance.get_typed_func::<i32, ()>(&mut store, "set_width").ok();
+    let set_height = instance.get_typed_func::<i32, ()>(&mut store, "set_height").ok();
+    let set_framerate = instance.get_typed_func::<i32, ()>(&mut store, "set_framerate").ok();
+
+    // Set rendering parameters if the WASM module supports it
+    if let Some(set_width) = &set_width {
+        let _ = set_width.call(&mut store, width as i32);
+    }
+    if let Some(set_height) = &set_height {
+        let _ = set_height.call(&mut store, height as i32);
+    }
+    if let Some(set_framerate) = &set_framerate {
+        let _ = set_framerate.call(&mut store, framerate as i32);
+    }
 
     // Get the memory export
     let memory = instance
