@@ -140,13 +140,14 @@ async fn complete_login(
     }))
 }
 async fn check_setup_status(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
 ) -> Result<Json<SetupStatusResponse>, (StatusCode, String)> {
-    // Removed unused import: UserRepository
-    // Check if any users exist in the database
-    // User count check disabled (user_repo removed)
-    let has_users = 0;
+    // Check if any super admins exist in the database
+    let count = state.user_repo.count_super_admins()
+        .await
+        .unwrap_or(0);
+    let is_initialized = count > 0;
     Ok(Json(SetupStatusResponse {
-        initialized: has_users != 0,
+        initialized: is_initialized,
     }))
 }
