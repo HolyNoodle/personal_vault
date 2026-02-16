@@ -170,6 +170,8 @@ impl WebRTCAdapter {
                 return Err(anyhow::anyhow!("No display found for session {}", session_id));
             }
         };
+        // Register X11 input session for this WebRTC session
+        self.input_manager.register_session(session_id.to_string(), display_str.clone()).await;
         let width = config.width;
         let height = config.height;
         let framerate = config.framerate;
