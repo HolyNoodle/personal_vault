@@ -185,9 +185,8 @@ pub extern "C" fn render_file_explorer_frame() {
             }
         }
 
-        // Get the persistent font texture for rendering
-        let font_texture_guard = FONT_TEXTURE.lock().unwrap();
-        let font_texture_ref = font_texture_guard.as_ref();
+        // Clone the font texture for rendering (don't hold lock during render)
+        let font_texture = FONT_TEXTURE.lock().unwrap().clone();
 
         log_wasm("[wasm] render_file_explorer_frame: before primitive loop");
         for cp in &clipped_primitives {
@@ -237,7 +236,7 @@ pub extern "C" fn render_file_explorer_frame() {
                                     + w2 * v2.color.a() as f32;
 
                                 // Sample font texture if available (for text rendering)
-                                if let Some(tex) = font_texture_ref {
+                                if let Some(ref tex) = font_texture {
                                     let u = w0 * v0.uv.x + w1 * v1.uv.x + w2 * v2.uv.x;
                                     let v = w0 * v0.uv.y + w1 * v1.uv.y + w2 * v2.uv.y;
                                     let tx = ((u * tex.size[0] as f32) as usize).min(tex.size[0].saturating_sub(1));
