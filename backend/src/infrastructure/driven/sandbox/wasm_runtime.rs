@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::{error, info, warn, debug};
 use wasmtime::*;
 
 const DEFAULT_WIDTH: u32 = 800;
@@ -135,8 +135,30 @@ fn run_wasm_render_loop(
     let module = Module::from_file(&engine, wasm_path)
         .with_context(|| format!("Failed to load WASM module: {}", wasm_path))?;
 
-    // Create a linker (no WASI needed for now — the module is self-contained)
-    let linker = Linker::new(&engine);
+    // Create a linker and define a host function for logging
+    let mut linker = Linker::new(&engine);
+    linker.func_wrap("env", "console_log", |mut caller: Caller<'_, ()>, ptr: u32, len: u32| {
+        debug!(target: "wasm-log", "[wasm] console_log host function CALLED: ptr={}, len={}", ptr, len);
+        let mem = match caller.get_export("memory") {
+            Some(Extern::Memory(mem)) => mem,
+            _ => {
+                error!(target: "wasm-log", "[wasm] console_log: memory export not found");
+                return;
+            }
+        };
+        let mut buf = vec![0u8; len as usize];
+        match mem.read(&mut caller, ptr as usize, &mut buf) {
+            Ok(_) => {
+                match std::str::from_utf8(&buf) {
+                    Ok(msg) => debug!(target: "wasm-log", "[wasm] {}", msg),
+                    Err(e) => error!(target: "wasm-log", "[wasm] console_log: utf8 error: {}", e),
+                }
+            }
+            Err(e) => {
+                error!(target: "wasm-log", "[wasm] console_log: memory read error: {}", e);
+            }
+        }
+    })?;
     let instance = linker
         .instantiate(&mut store, &module)
         .context("Failed to instantiate WASM module")?;
@@ -248,7 +270,7 @@ fn run_wasm_render_loop(
                 let a = frame_data[i * 4 + 3];
                 pixel_log.push_str(&format!("[{} {} {} {}] ", r, g, b, a));
             }
-            tracing::info!("[session {}] First 16 RGBA pixels: {}", session_id, pixel_log);
+            tracing::debug!("[session {}] First 16 RGBA pixels: {}", session_id, pixel_log);
         }
 
         // Send frame to GStreamer pipeline
@@ -262,7 +284,7 @@ fn run_wasm_render_loop(
 
         frame_count += 1;
         if frame_count % 30 == 0 {
-            tracing::info!(
+            tracing::debug!(
                 "[session {}] Rendered {} frames",
                 session_id,
                 frame_count

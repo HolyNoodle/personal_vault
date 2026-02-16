@@ -1,3 +1,5 @@
+# Ignore Docker persistent data
+docker_data/
 # Environment files (NEVER commit these - they contain secrets)
 .env
 .env.development
@@ -86,3 +88,5 @@ temp/
 *.backup
 *~
 .aider*
+
+.cache

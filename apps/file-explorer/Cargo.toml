@@ -6,9 +6,11 @@ edition.workspace = true
 # Prevent auto-discovery of main.rs as a binary target
 autobins = false
 
+
 [lib]
 crate-type = ["cdylib"]
 path = "src/lib.rs"
+
 
 [dependencies]
 egui = "0.29"

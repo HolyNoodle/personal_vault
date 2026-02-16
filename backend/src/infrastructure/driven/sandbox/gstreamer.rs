@@ -47,7 +47,7 @@ pub async fn feed_frames_to_appsrc(
                                 let base = i*4;
                                 px_str.push_str(&format!("[R:{} G:{} B:{} A:{}] ", data[base], data[base+1], data[base+2], data[base+3]));
                             }
-                            info!("[session {}] RGBA SOURCE buffer (first 8 px): {} (len={})", session_id, px_str, data.len());
+                            debug!("[session {}] RGBA SOURCE buffer (first 8 px): {} (len={})", session_id, px_str, data.len());
                         }
                         let mut buffer = gst::Buffer::from_slice(data);
                         {
@@ -64,7 +64,7 @@ pub async fn feed_frames_to_appsrc(
 
                         frame_count += 1;
                         if frame_count % 30 == 0 {
-                            info!("[session {}] Fed {} frames to GStreamer", session_id, frame_count);
+                            debug!("[session {}] Fed {} frames to GStreamer", session_id, frame_count);
                         }
                     }
                     None => {
@@ -191,7 +191,7 @@ impl GStreamerManager {
                         for i in 0..8.min(data.len()) {
                             px_str.push_str(&format!("{} ", data[i]));
                         }
-                        info!("[session {}] I420 after capsfilter (first 8 bytes): {}", session_id_owned, px_str);
+                        debug!("[session {}] I420 after capsfilter (first 8 bytes): {}", session_id_owned, px_str);
                     }
                 }
                 gst::PadProbeReturn::Ok
@@ -224,7 +224,7 @@ impl GStreamerManager {
                             for i in 0..8.min(data.len()) {
                                 px_str.push_str(&format!("{} ", data[i]));
                             }
-                            info!("[session] Appsink buffer first 8 bytes: {}", px_str);
+                            debug!("[session] Appsink buffer first 8 bytes: {}", px_str);
                             let _ = tx_cb.send(data.to_vec());
                         }
                     }

@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use webrtc::{
     api::{media_engine::MediaEngine, APIBuilder},
@@ -192,7 +192,7 @@ impl WebRTCAdapter {
                 } else {
                     frame_count += 1;
                     if frame_count % 30 == 0 {
-                        info!("Streamed {} VP8 frames", frame_count);
+                        debug!("Streamed {} VP8 frames", frame_count);
                     }
                 }
             }

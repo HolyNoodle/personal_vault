@@ -88,7 +88,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://sandbox_user:sandbox_dev_password@postgres:5432/sandbox_dev
       - REDIS_URL=redis://redis:6379
-      - RUST_LOG=debug,tower_http=info,cranelift_codegen=warn,wasmtime=warn,wasmtime_cranelift=warn
+      - RUST_LOG=debug,tower_http=info,cranelift_codegen=warn,wasmtime=warn,wasmtime_cranelift=warn,webrtc_dtls=error
       - WEBAUTHN_RP_ID=localhost
       - WEBAUTHN_ORIGIN=http://localhost:5173
       - IPC_SOCKET_PATH=/tmp/ipc/sandbox-ipc.sock
@@ -96,11 +96,14 @@ services:
       - TURN_USERNAME=sandbox
       - TURN_CREDENTIAL=dev_turn_secret
       - WASM_DIR=/app/target/wasm32-unknown-unknown/release
+      - HOME=/app
     volumes:
       - ./:/app
       - /home/holynoodle/Downloads:/data/storage
       - ipc_socket:/tmp/ipc
       - cargo_cache:/usr/local/cargo
+      - ./docker_data/fontconfig-cache:/var/cache/fontconfig
+      - ./docker_data/backend-cache:/app/cache
     depends_on:
       postgres:
         condition: service_healthy
