@@ -1,3 +1,82 @@
+use tokio_util::sync::CancellationToken;
+/// Push RGBA frames from a tokio mpsc channel into a GStreamer appsrc element.
+/// Cette fonction lit les frames RGBA depuis un channel et les pousse dans l'appsrc du pipeline.
+pub async fn feed_frames_to_appsrc(
+    pipeline: gst::Pipeline,
+    mut frame_rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
+    cancel_token: CancellationToken,
+    framerate: u8,
+    session_id: String,
+) {
+    use gstreamer_app::AppSrc;
+    use tracing::{info, warn};
+
+    let appsrc_el = match pipeline.by_name("appsrc") {
+        Some(el) => el,
+        None => {
+            warn!("[session {}] appsrc element not found in pipeline", session_id);
+            return;
+        }
+    };
+    let appsrc = match appsrc_el.downcast::<AppSrc>() {
+        Ok(src) => src,
+        Err(_) => {
+            warn!("[session {}] Failed to downcast to AppSrc", session_id);
+            return;
+        }
+    };
+
+    let frame_duration = gst::ClockTime::from_nseconds(1_000_000_000 / framerate.max(1) as u64);
+    let mut pts = gst::ClockTime::ZERO;
+    let mut frame_count = 0u64;
+
+    loop {
+        tokio::select! {
+            _ = cancel_token.cancelled() => {
+                info!("[session {}] Frame feeder cancelled after {} frames", session_id, frame_count);
+                let _ = appsrc.end_of_stream();
+                break;
+            }
+            frame = frame_rx.recv() => {
+                match frame {
+                    Some(data) => {
+                        // Log first 8 RGBA pixels before feeding to appsrc
+                        if frame_count < 3 {
+                            let mut px_str = String::new();
+                            for i in 0..8.min(data.len()/4) {
+                                let base = i*4;
+                                px_str.push_str(&format!("[{} {} {} {}] ", data[base], data[base+1], data[base+2], data[base+3]));
+                            }
+                            info!("[session {}] RGBA before appsrc: {}", session_id, px_str);
+                        }
+                        let mut buffer = gst::Buffer::from_slice(data);
+                        {
+                            let buf_ref = buffer.get_mut().unwrap();
+                            buf_ref.set_pts(pts);
+                            buf_ref.set_duration(frame_duration);
+                        }
+                        pts += frame_duration;
+
+                        if let Err(e) = appsrc.push_buffer(buffer) {
+                            warn!("[session {}] Failed to push buffer to appsrc: {:?}", session_id, e);
+                            break;
+                        }
+
+                        frame_count += 1;
+                        if frame_count % 30 == 0 {
+                            info!("[session {}] Fed {} frames to GStreamer", session_id, frame_count);
+                        }
+                    }
+                    None => {
+                        info!("[session {}] Frame channel closed after {} frames", session_id, frame_count);
+                        let _ = appsrc.end_of_stream();
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
 use anyhow::{Context, Result};
 use gstreamer as gst;
 use gstreamer::prelude::*;
@@ -18,20 +97,14 @@ impl GStreamerManager {
     /// Returns a std::sync::mpsc::Receiver<Vec<u8>> for VP8 encoded frames.
     ///
     /// The caller must push RGBA frames into the returned pipeline's appsrc element.
-        pub fn start_appsrc_pipeline(
-            &self,
-            session_id: &str,
-            width: u16,
-            height: u16,
-            framerate: u8,
-        ) -> Result<(gst::Pipeline, std::sync::mpsc::Receiver<Vec<u8>>)> {
-            // ...existing code...
-        info!(
-            "Starting GStreamer appsrc pipeline for session {} ({}x{}@{}fps)",
-            session_id, width, height, framerate
-        );
-
-        info!("[session {}] Creating pipeline", session_id);
+    pub fn start_appsrc_pipeline(
+        &self,
+        session_id: &str,
+        width: u16,
+        height: u16,
+        framerate: u8,
+    ) -> Result<(gst::Pipeline, std::sync::mpsc::Receiver<Vec<u8>>)> {
+        info!("Starting GStreamer appsrc pipeline for session {} ({}x{}@{}fps)", session_id, width, height, framerate);
         let pipeline = gst::Pipeline::default();
 
         // appsrc: accepts raw RGBA frames pushed from the WASM render loop
@@ -40,6 +113,7 @@ impl GStreamerManager {
             .name("appsrc")
             .property("is-live", true)
             .property("format", gst::Format::Time)
+            .property("do-timestamp", true)
             .build()
             .context("Failed to create appsrc")?;
 
@@ -54,7 +128,6 @@ impl GStreamerManager {
             .field("pixel-aspect-ratio", gst::Fraction::new(1, 1))
             .build();
         appsrc.set_property("caps", &caps);
-
 
         info!("[session {}] Creating videoconvert", session_id);
         let videoconvert = gst::ElementFactory::make("videoconvert")
@@ -75,25 +148,6 @@ impl GStreamerManager {
             )
             .build()
             .context("Failed to create capsfilter for I420")?;
-
-        // Add a pad probe to the capsfilter's src pad to log I420 data
-        {
-            let session_id_owned = session_id.to_string();
-            let capsfilter_src_pad = capsfilter.static_pad("src").expect("capsfilter has no src pad");
-            capsfilter_src_pad.add_probe(gst::PadProbeType::BUFFER, move |_pad, info| {
-                if let Some(gst::PadProbeData::Buffer(ref buffer)) = info.data {
-                    if let Ok(map) = buffer.map_readable() {
-                        let data = map.as_slice();
-                        let mut px_str = String::new();
-                        for i in 0..8.min(data.len()) {
-                            px_str.push_str(&format!("{} ", data[i]));
-                        }
-                        info!("[session {}] I420 after capsfilter (first 8 bytes): {}", session_id_owned, px_str);
-                    }
-                }
-                gst::PadProbeReturn::Ok
-            });
-        }
 
         info!("[session {}] Creating vp8enc", session_id);
         let vp8enc = gst::ElementFactory::make("vp8enc")
@@ -124,6 +178,7 @@ impl GStreamerManager {
         capsfilter.link(&vp8enc).context("Failed to link capsfilter -> vp8enc")?;
         info!("[session {}] Linking vp8enc -> appsink", session_id);
         vp8enc.link(&appsink).context("Failed to link vp8enc -> appsink")?;
+
         // Add a pad probe to the capsfilter's src pad to log I420 data
         {
             let session_id_owned = session_id.to_string();
@@ -207,89 +262,6 @@ impl GStreamerManager {
                 }
             }
         });
-
         Ok((pipeline, rx))
-    }
-
-    pub fn stop_pipeline(&self, pipeline: &gst::Pipeline) -> Result<()> {
-        pipeline.set_state(gst::State::Null)?;
-        Ok(())
-    }
-}
-
-/// Push RGBA frames from a tokio mpsc channel into a GStreamer appsrc element.
-/// This bridges the async WASM render loop to the GStreamer pipeline.
-pub async fn feed_frames_to_appsrc(
-    pipeline: gst::Pipeline,
-    mut frame_rx: mpsc::Receiver<Vec<u8>>,
-    cancel_token: tokio_util::sync::CancellationToken,
-    framerate: u8,
-    session_id: String,
-) {
-    let appsrc_el = match pipeline.by_name("appsrc") {
-        Some(el) => el,
-        None => {
-            error!("[session {}] appsrc element not found in pipeline", session_id);
-            return;
-        }
-    };
-
-    let appsrc = match appsrc_el.downcast::<AppSrc>() {
-        Ok(src) => src,
-        Err(_) => {
-            error!("[session {}] Failed to downcast to AppSrc", session_id);
-            return;
-        }
-    };
-
-    let frame_duration = gst::ClockTime::from_nseconds(1_000_000_000 / framerate.max(1) as u64);
-    let mut pts = gst::ClockTime::ZERO;
-    let mut frame_count = 0u64;
-
-    loop {
-        tokio::select! {
-            _ = cancel_token.cancelled() => {
-                info!("[session {}] Frame feeder cancelled after {} frames", session_id, frame_count);
-                let _ = appsrc.end_of_stream();
-                break;
-            }
-            frame = frame_rx.recv() => {
-                match frame {
-                    Some(data) => {
-                        // Log first 8 RGBA pixels before feeding to appsrc
-                        if frame_count < 3 {
-                            let mut px_str = String::new();
-                            for i in 0..8.min(data.len()/4) {
-                                let base = i*4;
-                                px_str.push_str(&format!("[{} {} {} {}] ", data[base], data[base+1], data[base+2], data[base+3]));
-                            }
-                            info!("[session {}] RGBA before appsrc: {}", session_id, px_str);
-                        }
-                        let mut buffer = gst::Buffer::from_slice(data);
-                        {
-                            let buf_ref = buffer.get_mut().unwrap();
-                            buf_ref.set_pts(pts);
-                            buf_ref.set_duration(frame_duration);
-                        }
-                        pts += frame_duration;
-
-                        if let Err(e) = appsrc.push_buffer(buffer) {
-                            warn!("[session {}] Failed to push buffer to appsrc: {:?}", session_id, e);
-                            break;
-                        }
-
-                        frame_count += 1;
-                        if frame_count % 30 == 0 {
-                            info!("[session {}] Fed {} frames to GStreamer", session_id, frame_count);
-                        }
-                    }
-                    None => {
-                        info!("[session {}] Frame channel closed after {} frames", session_id, frame_count);
-                        let _ = appsrc.end_of_stream();
-                        break;
-                    }
-                }
-            }
-        }
     }
 }
