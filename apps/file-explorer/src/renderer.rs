@@ -44,14 +44,6 @@ pub fn setup_custom_fonts(ctx: &egui::Context) {
     log_wasm("[wasm] Fonts successfully initialized");
 }
 
-fn create_initialized_context() -> egui::Context {
-    let ctx = egui::Context::default();
-    setup_custom_fonts(&ctx);
-    log_wasm("[wasm] Context created with fonts initialized");
-    ctx
-}
-
-
 extern "C" {
     fn console_log(ptr: *const u8, len: usize);
 }
@@ -94,7 +86,15 @@ fn framebuffer_size() -> usize {
 
 static FRAMEBUFFER: Lazy<Mutex<Vec<u8>>> = Lazy::new(|| Mutex::new(vec![0u8; 800 * 600 * 4]));
 static APP: Lazy<Mutex<FileExplorerApp>> = Lazy::new(|| Mutex::new(create_file_explorer_app()));
-static CTX: Lazy<egui::Context> = Lazy::new(create_initialized_context);
+static CTX: Lazy<egui::Context> = Lazy::new(|| {
+    log_wasm("[wasm] ===== CTX LAZY INITIALIZATION STARTING =====");
+    let ctx = egui::Context::default();
+    log_wasm("[wasm] Context::default() created");
+    setup_custom_fonts(&ctx);
+    log_wasm("[wasm] Context created with fonts initialized");
+    ctx
+});
+static FONT_TEXTURE: Lazy<Mutex<Option<egui::ColorImage>>> = Lazy::new(|| Mutex::new(None));
 
 // Input state forwarded from host
 static POINTER_POS: Lazy<Mutex<egui::Pos2>> =
@@ -107,7 +107,9 @@ pub extern "C" fn render_file_explorer_frame() {
     log_wasm("[wasm] render_file_explorer_frame: BEGIN WRAPPED");
     let result = panic::catch_unwind(|| {
         let mut app = APP.lock().unwrap();
+        log_wasm("[wasm] ===== ABOUT TO ACCESS CTX =====");
         let ctx = &*CTX;
+        log_wasm("[wasm] ===== CTX ACCESSED SUCCESSFULLY =====");
         log_wasm("[wasm] render_file_explorer_frame ENTRY");
         let pointer_pos = *POINTER_POS.lock().unwrap();
         let pointer_pressed = *POINTER_PRESSED.lock().unwrap();
@@ -156,24 +158,37 @@ pub extern "C" fn render_file_explorer_frame() {
         let textures = &full_output.textures_delta;
         // We only handle the font texture (id = Managed(0)) for text rendering
         log_wasm(&format!("[wasm] render_file_explorer_frame: width={}, height={}, fb_len={}", width, height, fb.len()));
-        let mut font_texture: Option<egui::ColorImage> = None;
+
+        // Update font texture if there's a new one
         log_wasm("[wasm] render_file_explorer_frame: before font texture loop");
         for (tex_id, delta) in &textures.set {
             if *tex_id == egui::TextureId::default() {
                 if let egui::ImageData::Font(font_image) = &delta.image {
                     let size = delta.image.size();
                     log_wasm(&format!("[wasm] Font texture generated: size={:?}", size));
-                    font_texture = Some(egui::ColorImage {
+                    let pixels: Vec<egui::Color32> = font_image.srgba_pixels(None).collect();
+
+                    // Debug: Check first few pixels of font texture
+                    if pixels.len() > 10 {
+                        log_wasm(&format!("[wasm] Font texture first 10 pixels: {:?}", &pixels[0..10]));
+                    }
+
+                    *FONT_TEXTURE.lock().unwrap() = Some(egui::ColorImage {
                         size: [size[0], size[1]],
-                        pixels: font_image.srgba_pixels(None).collect(),
+                        pixels,
                     });
                     log_wasm("[wasm] render_file_explorer_frame: after font texture generation");
                 } else if let egui::ImageData::Color(color_image) = &delta.image {
                     log_wasm("[wasm] Color image texture found in textures.set (unexpected for font)");
-                    font_texture = Some(color_image.as_ref().clone());
+                    *FONT_TEXTURE.lock().unwrap() = Some(color_image.as_ref().clone());
                 }
             }
         }
+
+        // Get the persistent font texture for rendering
+        let font_texture_guard = FONT_TEXTURE.lock().unwrap();
+        let font_texture_ref = font_texture_guard.as_ref();
+
         log_wasm("[wasm] render_file_explorer_frame: before primitive loop");
         for cp in &clipped_primitives {
             let clip = cp.clip_rect;
@@ -222,7 +237,7 @@ pub extern "C" fn render_file_explorer_frame() {
                                     + w2 * v2.color.a() as f32;
 
                                 // Sample font texture if available (for text rendering)
-                                if let Some(ref tex) = font_texture {
+                                if let Some(tex) = font_texture_ref {
                                     let u = w0 * v0.uv.x + w1 * v1.uv.x + w2 * v2.uv.x;
                                     let v = w0 * v0.uv.y + w1 * v1.uv.y + w2 * v2.uv.y;
                                     let tx = ((u * tex.size[0] as f32) as usize).min(tex.size[0].saturating_sub(1));
