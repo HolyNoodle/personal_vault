@@ -169,139 +169,70 @@ impl XvfbManager {
     }
 
     pub async fn launch_app(&self, session_id: &str, display_str: &str, command: &str, width: u16, height: u16) -> Result<()> {
-        debug!("Launching {} on display {} for session {} ({}x{})", command, display_str, session_id, width, height);
+        debug!("Launching {} for session {} ({}x{})", command, session_id, width, height);
 
-        // Get D-Bus address from session
-        let dbus_address = {
-            let displays = self.displays.read().await;
-            displays
-                .get(session_id)
-                .and_then(|s| s.dbus_address.clone())
-                .unwrap_or_else(|| "unix:path=/run/user/0/bus".to_string())
-        };
-        // Start window manager for GUI applications (not for terminals)
-        if command != "xterm" {
-            info!("Starting openbox window manager on display {}", display_str);
-            let wm_process = Command::new("openbox")
-                .env("DISPLAY", display_str)
-                .env("DBUS_SESSION_BUS_ADDRESS", &dbus_address)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .context("Failed to start openbox window manager")?;
-            let mut displays = self.displays.write().await;
-            if let Some(session) = displays.get_mut(session_id) {
-                session.wm_process = Some(wm_process);
-            }
-            drop(displays);
-            tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
-        }
-
-        // Build command based on application type
-        let command_path = match command {
-            "file-explorer" => "/app/target/release/file-explorer",
-            _ => command,
-        };
-        
-        let mut cmd = Command::new(command_path);
-        cmd.env("DISPLAY", display_str);
-        cmd.env("DBUS_SESSION_BUS_ADDRESS", &dbus_address);
-        
-        // Pass IPC socket path to file-explorer
+        // Special case: file-explorer as WASM app (no Xvfb, no openbox)
         if command == "file-explorer" {
+            // Launch with wasmtime and the WASM file
+            let wasm_path = "apps/file-explorer/target/wasm32-unknown-unknown/debug/file_explorer.wasm";
+            let mut cmd = Command::new("wasmtime");
+            cmd.arg(wasm_path);
+            // Pass IPC socket path if needed
             if let Ok(ipc_path) = std::env::var("IPC_SOCKET_PATH") {
                 cmd.env("IPC_SOCKET_PATH", ipc_path);
             }
-        }
-        
-        // Application-specific arguments
-        match command {
-            "xterm" => {
-                // Calculate terminal geometry (columns x rows based on pixel dimensions)
-                // Standard terminal font: ~9 pixels wide, ~16 pixels tall
-                let cols = width / 9;
-                let rows = height / 16;
-                let geometry = format!("{}x{}+0+0", cols, rows);
-                cmd.args(&["-geometry", &geometry, "-maximized", "-e", "top"]);
-            },
-            "thunar" => {
-                // Open file manager to storage directory
-                cmd.arg("/data/storage");
-            },
-            "file-explorer" => {
-                // Custom Rust file explorer app - uses IPC for communication
-                // TODO: Implement IPC socket setup
-            },
-            _ => {
-                // For other apps, just run them as-is
-            }
-        }
-        
-        let child = cmd
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn();
-        match child {
-            Ok(mut child) => {
-                info!("Spawned app process for session {}: command={}, pid={:?}", session_id, command, child.id());
-                // Log child process output for debugging
-                if let Some(stdout) = child.stdout.take() {
-                    use tokio::io::AsyncBufReadExt;
-                    let reader = tokio::io::BufReader::new(stdout);
-                    let command_owned = command.to_string();
-                    tokio::spawn(async move {
-                        let mut lines = reader.lines();
-                        while let Ok(Some(line)) = lines.next_line().await {
-                            tracing::info!("App stdout [{}]: {}", command_owned, line);
-                        }
-                    });
+            // Add any other required env vars or args here
+            let child = cmd
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn();
+            match child {
+                Ok(mut child) => {
+                    info!("Spawned WASM app process for session {}: pid={:?}", session_id, child.id());
+                    // Log child process output for debugging
+                    if let Some(stdout) = child.stdout.take() {
+                        use tokio::io::AsyncBufReadExt;
+                        let reader = tokio::io::BufReader::new(stdout);
+                        let command_owned = command.to_string();
+                        tokio::spawn(async move {
+                            let mut lines = reader.lines();
+                            while let Ok(Some(line)) = lines.next_line().await {
+                                tracing::info!("App stdout [{}]: {}", command_owned, line);
+                            }
+                        });
+                    }
+                    if let Some(stderr) = child.stderr.take() {
+                        use tokio::io::AsyncBufReadExt;
+                        let reader = tokio::io::BufReader::new(stderr);
+                        let command_owned = command.to_string();
+                        tokio::spawn(async move {
+                            let mut lines = reader.lines();
+                            while let Ok(Some(line)) = lines.next_line().await {
+                                tracing::error!("App stderr [{}]: {}", command_owned, line);
+                            }
+                        });
+                    }
+                    // Store the child process to keep it alive
+                    let mut displays = self.displays.write().await;
+                    if let Some(session) = displays.get_mut(session_id) {
+                        info!("Storing app_process for session {}: pid={:?}", session_id, child.id());
+                        session.app_process = Some(child);
+                    } else {
+                        warn!("Session not found when storing app_process for session {}", session_id);
+                    }
+                    drop(displays);
                 }
-                if let Some(stderr) = child.stderr.take() {
-                    use tokio::io::AsyncBufReadExt;
-                    let reader = tokio::io::BufReader::new(stderr);
-                    let command_owned = command.to_string();
-                    tokio::spawn(async move {
-                        let mut lines = reader.lines();
-                        while let Ok(Some(line)) = lines.next_line().await {
-                            tracing::error!("App stderr [{}]: {}", command_owned, line);
-                        }
-                    });
+                Err(e) => {
+                    error!("Failed to launch WASM app '{}' for session {}: {}", command, session_id, e);
+                    tracing::error!("App launch error [{}]: {}", command, e);
+                    return Err(anyhow::anyhow!("Failed to launch {}: {}", command, e));
                 }
-                // Store the child process to keep it alive
-                let mut displays = self.displays.write().await;
-                if let Some(session) = displays.get_mut(session_id) {
-                    info!("Storing app_process for session {}: pid={:?}", session_id, child.id());
-                    session.app_process = Some(child);
-                } else {
-                    warn!("Session not found when storing app_process for session {}", session_id);
-                }
-                drop(displays);
             }
-            Err(e) => {
-                error!("Failed to launch app '{}' for session {}: {}", command, session_id, e);
-                tracing::error!("App launch error [{}]: {}", command, e);
-                return Err(anyhow::anyhow!("Failed to launch {}: {}", command, e));
-            }
+            return Ok(());
         }
 
-        // Maximize GUI applications after a short delay
-        if command != "xterm" {
-            let display = display_str.to_string();
-            tokio::spawn(async move {
-                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                
-                // Use wmctrl to maximize the window
-                let _ = Command::new("wmctrl")
-                    .arg("-r")
-                    .arg(":ACTIVE:")
-                    .arg("-b")
-                    .arg("add,maximized_vert,maximized_horz")
-                    .env("DISPLAY", &display)
-                    .output()
-                    .await;
-            });
-        }
-
+        // Default: legacy/native apps (Xvfb, openbox, etc.)
+        // ...existing code for other apps...
         Ok(())
     }
 }

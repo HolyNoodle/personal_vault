@@ -1,7 +1,9 @@
 {
   "name": "File Explorer",
   "version": "0.1.0",
-  "description": "Platform-aware file explorer with upload/download capabilities",
+  "description": "WASM file explorer with egui UI, rendered via embedded wasmtime runtime",
+  "type": "wasm",
+  "wasm_module": "file_explorer.wasm",
   "permissions": [
     "filesystem:read",
     "filesystem:write",
@@ -15,6 +17,12 @@
     "delete",
     "preview"
   ],
-  "command": "./file-explorer",
-  "socket_path": "/tmp/sandbox-ipc-{session_id}.sock"
+  "exports": {
+    "render_frame": "render_file_explorer_frame",
+    "get_framebuffer_ptr": "get_framebuffer_ptr",
+    "get_framebuffer_size": "get_framebuffer_size",
+    "get_width": "get_width",
+    "get_height": "get_height",
+    "handle_pointer_event": "handle_pointer_event"
+  }
 }

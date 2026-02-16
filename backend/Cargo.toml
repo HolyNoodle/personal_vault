@@ -14,12 +14,13 @@ categories = ["web-programming", "multimedia", "network-programming"]
 # Shared protocol
 shared = { path = "../shared" }
 
-# GStreamer for video capture/encoding
+# GStreamer for video encoding
 gstreamer = { version = "0.22", features = ["v1_22"] }
 gstreamer-video = "0.22"
 gstreamer-app = "0.22"
-gstreamer-rtp = "0.22"
-gstreamer-webrtc = { version = "0.25.0-alpha.2" }
+
+# WASM runtime
+wasmtime = "29"
 
 # Web framework
 axum = { version = "0.7", features = ["macros", "ws"] }
@@ -89,9 +90,6 @@ lettre = "0.11"
 
 # Landlock LSM
 landlock = "0.3"
-
-# X11 for input injection
-x11rb = { version = "0.13", features = ["allow-unsafe-code", "xtest"] }
 
 [dev-dependencies]
 # Testing

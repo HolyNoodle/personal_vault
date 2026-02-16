@@ -54,11 +54,11 @@ pub extern "C" fn render_file_explorer_frame() {
     // Software rasterize into RGBA buffer
     let mut fb = FRAMEBUFFER.lock().unwrap();
 
-    // Clear to dark background
+    // Clear to red for debugging
     for chunk in fb.chunks_exact_mut(4) {
-        chunk[0] = 30; // R
-        chunk[1] = 30; // G
-        chunk[2] = 30; // B
+        chunk[0] = 255; // R
+        chunk[1] = 0;   // G
+        chunk[2] = 0;   // B
         chunk[3] = 255; // A
     }
 
@@ -68,7 +68,6 @@ pub extern "C" fn render_file_explorer_frame() {
     for (tex_id, delta) in &textures.set {
         if *tex_id == egui::TextureId::default() {
             if let egui::ImageData::Font(font_image) = &delta.image {
-                font_texture = Some(font_image.srgba_pixels(None).collect::<Vec<_>>().into());
                 let size = delta.image.size();
                 font_texture = Some(egui::ColorImage {
                     size: [size[0], size[1]],

@@ -85,3 +85,4 @@ temp/
 *.bak
 *.backup
 *~
+.aider*

@@ -9,28 +9,41 @@ RUN npm ci
 COPY frontend/web/ ./
 RUN npm run build
 
+# Build WASM app
+FROM rust:1.93-slim AS wasm-builder
+
+WORKDIR /app
+
+RUN rustup target add wasm32-unknown-unknown
+
+# Copy workspace files
+COPY Cargo.toml Cargo.lock ./
+COPY shared/ ./shared/
+COPY apps/file-explorer/ ./apps/file-explorer/
+
+# Build the file-explorer WASM module
+RUN cargo build --target wasm32-unknown-unknown --release -p file-explorer
+
 # Build backend
 FROM rust:1.93-slim AS backend-builder
 
 WORKDIR /app
 
-# Install build dependencies
+# Install build dependencies (including GStreamer dev libs)
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
+    libgstreamer1.0-dev \
+    libgstreamer-plugins-base1.0-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy backend manifests
-COPY backend/Cargo.toml backend/Cargo.lock ./
+# Copy workspace files
+COPY Cargo.toml Cargo.lock ./
+COPY shared/ ./shared/
+COPY apps/file-explorer/ ./apps/file-explorer/
 
-# Cache dependencies
-RUN mkdir src && \
-    echo "fn main() {}" > src/main.rs && \
-    cargo build --release && \
-    rm -rf src
-
-# Copy backend source
-COPY backend/ ./
+# Copy backend manifests and source
+COPY backend/ ./backend/
 
 # Build release binary
 RUN cargo build --release --bin sandbox-server
@@ -43,30 +56,31 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
     postgresql-client \
-    xvfb \
-    ffmpeg \
-    xterm \
-    thunar \
-    dbus-x11 \
-    wmctrl \
-    openbox \
-    xdotool \
-    libxkbcommon-x11-0 \
-    libxkbcommon0 \
+    libgstreamer1.0-0 \
+    gstreamer1.0-plugins-base \
+    gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-ugly \
+    gstreamer1.0-libav \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app user
 RUN useradd -m -u 1000 sandbox && \
-    mkdir -p /var/lib/sandbox/storage /var/log/sandbox && \
-    chown -R sandbox:sandbox /var/lib/sandbox /var/log/sandbox
+    mkdir -p /var/lib/sandbox/storage /var/log/sandbox /app/wasm && \
+    chown -R sandbox:sandbox /var/lib/sandbox /var/log/sandbox /app/wasm
 
 WORKDIR /app
 
 # Copy binary from backend builder
 COPY --from=backend-builder /app/target/release/sandbox-server /usr/local/bin/sandbox-server
 
+# Copy WASM binary from wasm builder
+COPY --from=wasm-builder /app/target/wasm32-unknown-unknown/release/file_explorer.wasm /app/wasm/file_explorer.wasm
+
 # Copy frontend static files from frontend builder
 COPY --from=frontend-builder /app/frontend/web/dist /app/static
+
+# Set WASM directory
+ENV WASM_DIR=/app/wasm
 
 # Switch to non-root user
 USER sandbox

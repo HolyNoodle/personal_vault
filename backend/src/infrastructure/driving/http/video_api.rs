@@ -15,7 +15,7 @@ pub struct ApiState {
     pub terminate_session_handler: Arc<TerminateSessionHandler>,
     pub webrtc_adapter: Arc<WebRTCAdapter>,
     pub gstreamer: Arc<crate::infrastructure::driven::sandbox::GStreamerManager>,
-    pub xvfb_manager: Arc<crate::infrastructure::driven::sandbox::XvfbManager>,
+    pub wasm_manager: Arc<crate::infrastructure::driven::sandbox::WasmAppManager>,
 }
 
 pub fn create_video_routes(state: Arc<ApiState>) -> Router {
@@ -29,8 +29,6 @@ async fn create_session(
     State(state): State<Arc<ApiState>>,
     Json(payload): Json<Value>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    // TODO: Extract user_id from authenticated JWT token
-    // For now, require user_id in payload until auth middleware is integrated
     let user_id = payload["user_id"]
         .as_str()
         .ok_or_else(|| (
@@ -45,7 +43,7 @@ async fn create_session(
         application: payload["application"]
             .as_str()
             .map(String::from)
-            .unwrap_or_else(|| "xterm".to_string()),
+            .unwrap_or_else(|| "file-explorer".to_string()),
     };
 
     tracing::info!("[API] Calling CreateSessionHandler for user_id={}", command.user_id);

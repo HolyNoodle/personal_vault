@@ -1,2 +1,1 @@
-pub mod xdotool;
-pub mod x11_input;
+// Input handling is now managed by WasmAppManager directly

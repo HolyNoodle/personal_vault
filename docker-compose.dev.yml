@@ -95,6 +95,7 @@ services:
       - TURN_SERVER=turn:sandbox-coturn-dev:3478
       - TURN_USERNAME=sandbox
       - TURN_CREDENTIAL=dev_turn_secret
+      - WASM_DIR=/app/target/wasm32-unknown-unknown/release
     volumes:
       - ./:/app
       - /home/holynoodle/Downloads:/data/storage
