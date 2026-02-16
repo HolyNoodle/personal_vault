@@ -41,6 +41,14 @@ pub fn setup_custom_fonts(ctx: &egui::Context) {
     }
 
     ctx.set_fonts(fonts);
+    log_wasm("[wasm] Fonts successfully initialized");
+}
+
+fn create_initialized_context() -> egui::Context {
+    let ctx = egui::Context::default();
+    setup_custom_fonts(&ctx);
+    log_wasm("[wasm] Context created with fonts initialized");
+    ctx
 }
 
 
@@ -86,7 +94,7 @@ fn framebuffer_size() -> usize {
 
 static FRAMEBUFFER: Lazy<Mutex<Vec<u8>>> = Lazy::new(|| Mutex::new(vec![0u8; 800 * 600 * 4]));
 static APP: Lazy<Mutex<FileExplorerApp>> = Lazy::new(|| Mutex::new(create_file_explorer_app()));
-static CTX: Lazy<egui::Context> = Lazy::new(egui::Context::default);
+static CTX: Lazy<egui::Context> = Lazy::new(create_initialized_context);
 
 // Input state forwarded from host
 static POINTER_POS: Lazy<Mutex<egui::Pos2>> =
@@ -100,7 +108,6 @@ pub extern "C" fn render_file_explorer_frame() {
     let result = panic::catch_unwind(|| {
         let mut app = APP.lock().unwrap();
         let ctx = &*CTX;
-        setup_custom_fonts(ctx);
         log_wasm("[wasm] render_file_explorer_frame ENTRY");
         let pointer_pos = *POINTER_POS.lock().unwrap();
         let pointer_pressed = *POINTER_PRESSED.lock().unwrap();
