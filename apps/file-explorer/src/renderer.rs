@@ -3,21 +3,42 @@ use egui::FontFamily;
 pub fn setup_custom_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
 
-    // Embed DejaVuSans.ttf directly in WASM binary
-    let font_data = include_bytes!("../assets/DejaVuSans.ttf");
+    // Embed DejaVuSans.ttf and LiberationSans-Regular.ttf directly in WASM binary
+    const DEJAVU_FONT: &[u8] = include_bytes!("../assets/DejaVuSans.ttf");
+    const LIBERATION_FONT: &[u8] = include_bytes!("../assets/LiberationSans-Regular.ttf");
+    log_wasm(&format!("[wasm] setup_custom_fonts: DejaVuSans.ttf bytes = {}", DEJAVU_FONT.len()));
+    log_wasm(&format!("[wasm] setup_custom_fonts: LiberationSans-Regular.ttf bytes = {}", LIBERATION_FONT.len()));
+    if DEJAVU_FONT.len() == 0 {
+        log_wasm("[wasm] WARNING: DejaVuSans.ttf is empty!");
+    }
+    if LIBERATION_FONT.len() == 0 {
+        log_wasm("[wasm] WARNING: LiberationSans-Regular.ttf is empty!");
+    }
 
     fonts.font_data.insert(
-        "my_font".to_owned(),
-        egui::FontData::from_static(font_data),
+        "DejaVuSans".to_owned(),
+        egui::FontData::from_static(DEJAVU_FONT),
+    );
+    fonts.font_data.insert(
+        "LiberationSans".to_owned(),
+        egui::FontData::from_static(LIBERATION_FONT),
     );
 
-    // Set the font for Proportional and Monospace
-    fonts.families.get_mut(&FontFamily::Proportional)
-        .unwrap()
-        .insert(0, "my_font".to_owned());
-    fonts.families.get_mut(&FontFamily::Monospace)
-        .unwrap()
-        .push("my_font".to_owned());
+    // Set the font for Proportional and Monospace, with fallback
+    if let Some(family) = fonts.families.get_mut(&FontFamily::Proportional) {
+        family.clear();
+        family.push("DejaVuSans".to_owned());
+        family.push("LiberationSans".to_owned());
+    } else {
+        log_wasm("[wasm] WARNING: Proportional font family not found!");
+    }
+    if let Some(family) = fonts.families.get_mut(&FontFamily::Monospace) {
+        family.clear();
+        family.push("DejaVuSans".to_owned());
+        family.push("LiberationSans".to_owned());
+    } else {
+        log_wasm("[wasm] WARNING: Monospace font family not found!");
+    }
 
     ctx.set_fonts(fonts);
 }
