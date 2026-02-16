@@ -156,16 +156,21 @@ fn run_wasm_render_loop(
         .context("Missing export: get_framebuffer_size")?;
 
     // Try to get exported setters for width/height/framerate if present
+    let set_size = instance.get_typed_func::<(i32, i32), ()>(&mut store, "set_size").ok();
     let set_width = instance.get_typed_func::<i32, ()>(&mut store, "set_width").ok();
     let set_height = instance.get_typed_func::<i32, ()>(&mut store, "set_height").ok();
     let set_framerate = instance.get_typed_func::<i32, ()>(&mut store, "set_framerate").ok();
 
     // Set rendering parameters if the WASM module supports it
-    if let Some(set_width) = &set_width {
-        let _ = set_width.call(&mut store, width as i32);
-    }
-    if let Some(set_height) = &set_height {
-        let _ = set_height.call(&mut store, height as i32);
+    if let Some(set_size) = &set_size {
+        let _ = set_size.call(&mut store, (width as i32, height as i32));
+    } else {
+        if let Some(set_width) = &set_width {
+            let _ = set_width.call(&mut store, width as i32);
+        }
+        if let Some(set_height) = &set_height {
+            let _ = set_height.call(&mut store, height as i32);
+        }
     }
     if let Some(set_framerate) = &set_framerate {
         let _ = set_framerate.call(&mut store, framerate as i32);

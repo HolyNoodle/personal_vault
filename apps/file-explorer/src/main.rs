@@ -215,3 +215,4 @@ pub extern "C" fn handle_pointer_event(x: f32, y: f32, pressed: u32) {
     *POINTER_POS.lock().unwrap() = egui::Pos2::new(x, y);
     *POINTER_PRESSED.lock().unwrap() = pressed != 0;
 }
+// main.rs is now a stub. All WASM entry points are provided by renderer.rs via lib.rs re-exports.

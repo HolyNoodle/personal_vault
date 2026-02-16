@@ -1,3 +1,14 @@
+#[no_mangle]
+pub extern "C" fn set_size(w: i32, h: i32) {
+    let mut width = WIDTH.lock().unwrap();
+    let mut height = HEIGHT.lock().unwrap();
+    let mut fb = FRAMEBUFFER.lock().unwrap();
+    if w > 0 && h > 0 && (*width != w as usize || *height != h as usize) {
+        *width = w as usize;
+        *height = h as usize;
+        fb.resize(*width * *height * 4, 0);
+    }
+}
 use crate::app::{create_file_explorer_app, FileExplorerApp};
 use egui;
 use epaint::{ClippedPrimitive, Primitive};
