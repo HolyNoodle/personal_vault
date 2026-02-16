@@ -40,14 +40,14 @@ pub async fn feed_frames_to_appsrc(
             frame = frame_rx.recv() => {
                 match frame {
                     Some(data) => {
-                        // Log first 8 RGBA pixels before feeding to appsrc
-                        if frame_count < 3 {
+                        // Log first 32 bytes (8 pixels RGBA) of the buffer as received from the source (shared memory/channel)
+                        if frame_count < 10 {
                             let mut px_str = String::new();
                             for i in 0..8.min(data.len()/4) {
                                 let base = i*4;
-                                px_str.push_str(&format!("[{} {} {} {}] ", data[base], data[base+1], data[base+2], data[base+3]));
+                                px_str.push_str(&format!("[R:{} G:{} B:{} A:{}] ", data[base], data[base+1], data[base+2], data[base+3]));
                             }
-                            info!("[session {}] RGBA before appsrc: {}", session_id, px_str);
+                            info!("[session {}] RGBA SOURCE buffer (first 8 px): {} (len={})", session_id, px_str, data.len());
                         }
                         let mut buffer = gst::Buffer::from_slice(data);
                         {
