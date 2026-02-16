@@ -192,7 +192,7 @@ impl WebRTCAdapter {
                 } else {
                     frame_count += 1;
                     if frame_count % 30 == 0 {
-                        debug!("Streamed {} VP8 frames", frame_count);
+                        info!("Streamed {} VP8 frames", frame_count);
                     }
                 }
             }
@@ -313,7 +313,7 @@ impl WebRTCAdapter {
         sdp_mid: Option<String>,
         sdp_mline_index: Option<u16>,
     ) -> Result<()> {
-        debug!(
+        info!(
             "Received ICE candidate from client for session: {}",
             session_id
         );
@@ -328,7 +328,7 @@ impl WebRTCAdapter {
                 ..Default::default()
             };
             pc.add_ice_candidate(ice_candidate).await?;
-            debug!("Added ICE candidate for session: {}", session_id);
+            info!("Added ICE candidate for session: {}", session_id);
         } else {
             return Err(anyhow::anyhow!("Peer connection not found"));
         }
@@ -399,7 +399,7 @@ async fn handle_socket(socket: WebSocket, adapter: Arc<WebRTCAdapter>, session_i
         match receiver.next().await {
             Some(Ok(msg)) => match msg {
                 Message::Text(text) => {
-                    debug!("Received message: {}", text);
+                    info!("Received message: {}", text);
                     match serde_json::from_str::<SignalingMessage>(&text) {
                         Ok(message) => {
                             let response = handle_signaling_message(
@@ -491,7 +491,7 @@ async fn handle_signaling_message(
             Ok(None)
         }
         SignalingMessage::MouseMove { x, y } => {
-            debug!("Received MouseMove: x={}, y={}", x, y);
+            info!("Received MouseMove: x={}, y={}", x, y);
             adapter
                 .wasm_manager
                 .handle_pointer_event(session_id, x as f32, y as f32, false)

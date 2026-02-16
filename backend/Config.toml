@@ -1,0 +1,4 @@
+info
+cranelift_codegen=warn
+wasmtime=warn
+wasmtime_cranelift=warn

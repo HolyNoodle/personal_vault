@@ -23,6 +23,8 @@ use application::ports::{CredentialRepository, ChallengeRepository};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+
+    // Minimal logging: info and above
     tracing_subscriber::fmt::init();
 
     println!("Sandbox Server starting...");

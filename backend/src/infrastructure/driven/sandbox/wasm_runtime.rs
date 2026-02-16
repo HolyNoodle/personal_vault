@@ -234,7 +234,7 @@ fn run_wasm_render_loop(
 
         frame_count += 1;
         if frame_count % 30 == 0 {
-            tracing::debug!(
+            tracing::info!(
                 "[session {}] Rendered {} frames",
                 session_id,
                 frame_count

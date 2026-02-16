@@ -30,9 +30,11 @@ impl GStreamerManager {
             session_id, width, height, framerate
         );
 
+        info!("[session {}] Creating pipeline", session_id);
         let pipeline = gst::Pipeline::default();
 
         // appsrc: accepts raw RGBA frames pushed from the WASM render loop
+        info!("[session {}] Creating appsrc", session_id);
         let appsrc = gst::ElementFactory::make("appsrc")
             .name("appsrc")
             .property("is-live", true)
@@ -49,10 +51,27 @@ impl GStreamerManager {
             .build()
             .context("Failed to create appsrc")?;
 
+
+        info!("[session {}] Creating videoconvert", session_id);
         let videoconvert = gst::ElementFactory::make("videoconvert")
             .build()
             .context("Failed to create videoconvert")?;
 
+        info!("[session {}] Creating capsfilter (I420)", session_id);
+        let capsfilter = gst::ElementFactory::make("capsfilter")
+            .property(
+                "caps",
+                &gst::Caps::builder("video/x-raw")
+                    .field("format", "I420")
+                    .field("width", width as i32)
+                    .field("height", height as i32)
+                    .field("framerate", gst::Fraction::new(framerate as i32, 1))
+                    .build(),
+            )
+            .build()
+            .context("Failed to create capsfilter for I420")?;
+
+        info!("[session {}] Creating vp8enc", session_id);
         let vp8enc = gst::ElementFactory::make("vp8enc")
             .property("deadline", 1i64)
             .property("cpu-used", 8i32)
@@ -60,6 +79,7 @@ impl GStreamerManager {
             .build()
             .context("Failed to create vp8enc")?;
 
+        info!("[session {}] Creating appsink", session_id);
         let appsink = gst::ElementFactory::make("appsink")
             .name("appsink")
             .property("sync", false)
@@ -69,17 +89,19 @@ impl GStreamerManager {
             .build()
             .context("Failed to create appsink")?;
 
-        pipeline.add_many([&appsrc, &videoconvert, &vp8enc, &appsink])?;
+        info!("[session {}] Adding elements to pipeline", session_id);
+        pipeline.add_many([&appsrc, &videoconvert, &capsfilter, &vp8enc, &appsink])?;
 
-        appsrc
-            .link(&videoconvert)
-            .context("Failed to link appsrc -> videoconvert")?;
-        videoconvert
-            .link(&vp8enc)
-            .context("Failed to link videoconvert -> vp8enc")?;
-        vp8enc
-            .link(&appsink)
-            .context("Failed to link vp8enc -> appsink")?;
+        info!("[session {}] Linking appsrc -> videoconvert", session_id);
+        appsrc.link(&videoconvert).context("Failed to link appsrc -> videoconvert")?;
+        info!("[session {}] Linking videoconvert -> capsfilter", session_id);
+        videoconvert.link(&capsfilter).context("Failed to link videoconvert -> capsfilter")?;
+        info!("[session {}] Linking capsfilter -> vp8enc", session_id);
+        capsfilter.link(&vp8enc).context("Failed to link capsfilter -> vp8enc")?;
+        info!("[session {}] Linking vp8enc -> appsink", session_id);
+        vp8enc.link(&appsink).context("Failed to link vp8enc -> appsink")?;
+
+        info!("[session {}] Pipeline created and linked", session_id);
 
         // Set up appsink callback to forward VP8 frames
         let appsink_el = appsink
@@ -201,7 +223,7 @@ pub async fn feed_frames_to_appsrc(
 
                         frame_count += 1;
                         if frame_count % 30 == 0 {
-                            debug!("[session {}] Fed {} frames to GStreamer", session_id, frame_count);
+                            info!("[session {}] Fed {} frames to GStreamer", session_id, frame_count);
                         }
                     }
                     None => {

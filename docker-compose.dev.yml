@@ -88,7 +88,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://sandbox_user:sandbox_dev_password@postgres:5432/sandbox_dev
       - REDIS_URL=redis://redis:6379
-      - RUST_LOG=debug
+      - RUST_LOG=debug,tower_http=info,cranelift_codegen=warn,wasmtime=warn,wasmtime_cranelift=warn
       - WEBAUTHN_RP_ID=localhost
       - WEBAUTHN_ORIGIN=http://localhost:5173
       - IPC_SOCKET_PATH=/tmp/ipc/sandbox-ipc.sock
