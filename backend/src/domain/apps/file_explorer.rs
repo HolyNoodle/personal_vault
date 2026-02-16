@@ -46,7 +46,7 @@ impl Default for FileExplorerApp {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct AppMetadata {
     pub app_id: AppId,
     pub name: String,

@@ -9,4 +9,11 @@ pub enum UserStatus {
 
 impl UserStatus {
     // Removed unused methods as_str and from_str
+    pub fn as_db_str(&self) -> &'static str {
+        match self {
+            UserStatus::Active => "active",
+            UserStatus::Suspended => "suspended",
+            UserStatus::Deleted => "deleted",
+        }
+    }
 }

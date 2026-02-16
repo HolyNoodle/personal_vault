@@ -34,7 +34,10 @@ pub async fn execute(
     
     println!("Creating user with id: {}", user.id());
     
-    // User persistence disabled (user_repo removed)
+    // Persist user before credential
+    state.user_repo.save(&user)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     
     println!("User created, now creating credential");
     

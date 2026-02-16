@@ -17,19 +17,28 @@ pub async fn execute(
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
     
     // Find user by email
-    // User lookup disabled (user_repo removed)
-    // Removed unused variable user
-    
-    // Get user's credentials
-    let credentials: Vec<&str> = vec![];
-    
-    println!("Found {} credentials for user {}", credentials.len(), email);
-    
-    if credentials.is_empty() {
-        return Err((StatusCode::NOT_FOUND, "No credentials found for user".to_string()));
-    }
-    
-    let passkeys: Vec<Passkey> = vec![]; // passkey collection removed
+        let user = state.user_repo
+            .find_by_email(&email)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?
+            .ok_or((StatusCode::NOT_FOUND, "User not found".to_string()))?;
+
+        // Get user's credentials
+        let credentials = state.credential_repo
+            .find_by_user_id(user.id())
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+        println!("Found {} credentials for user {}", credentials.len(), email);
+
+        if credentials.is_empty() {
+            return Err((StatusCode::NOT_FOUND, "No credentials found for user".to_string()));
+        }
+
+        let passkeys: Vec<Passkey> = credentials
+            .iter()
+            .map(|cred| cred.passkey().clone())
+            .collect();
     
     // Generate WebAuthn challenge
     let (challenge, auth_state) = state.webauthn

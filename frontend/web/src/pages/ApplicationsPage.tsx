@@ -37,7 +37,7 @@ export function ApplicationsPage() {
       const response = await fetch('http://localhost:8080/api/applications');
       if (!response.ok) throw new Error('Failed to load applications');
       const data = await response.json();
-      setApplications(data.applications || []);
+      setApplications(Array.isArray(data) ? data : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {

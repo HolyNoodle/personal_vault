@@ -15,8 +15,12 @@ export interface CreateSessionResponse {
 export class WebRTCService {
   private baseUrl: string
 
-  constructor(baseUrl: string = 'http://localhost:8080') {
-    this.baseUrl = baseUrl
+  constructor() {
+    // Use VITE_API_URL if set, otherwise use Docker hostname
+    this.baseUrl =
+      typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+        ? 'http://sandbox-backend-dev:8080'
+        : (import.meta.env.VITE_API_URL || 'http://localhost:8080');
   }
 
   async createSession(config: SessionConfig): Promise<CreateSessionResponse> {

@@ -63,7 +63,7 @@ pub struct UserInfo {
 
 #[derive(Serialize)]
 pub struct SetupStatusResponse {
-    pub needs_setup: bool,
+    pub initialized: bool,
 }
 
 pub fn setup_routes() -> Router<AppState> {
@@ -140,15 +140,13 @@ async fn complete_login(
     }))
 }
 async fn check_setup_status(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
 ) -> Result<Json<SetupStatusResponse>, (StatusCode, String)> {
     // Removed unused import: UserRepository
-    
     // Check if any users exist in the database
     // User count check disabled (user_repo removed)
     let has_users = 0;
-    
     Ok(Json(SetupStatusResponse {
-        needs_setup: has_users == 0,
+        initialized: has_users != 0,
     }))
 }

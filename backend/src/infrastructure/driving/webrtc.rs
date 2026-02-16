@@ -1,3 +1,4 @@
+use crate::infrastructure::driven::sandbox::XvfbManager;
 use anyhow::Result;
 use axum::{
     extract::{
@@ -13,6 +14,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use tokio::io::AsyncReadExt;
 use tokio::process::ChildStdout;
+use crate::infrastructure::driven::sandbox::GStreamerManager;
 // Removed unused import: BufMut
 use webrtc::{
     api::{
@@ -69,23 +71,25 @@ pub struct WebRTCAdapter {
     cancel_tokens: Arc<RwLock<HashMap<String, CancellationToken>>>,
     ffmpeg_handles: Arc<RwLock<HashMap<String, ChildStdout>>>,
     input_manager: Arc<X11InputManager>,
+    xvfb_manager: Arc<XvfbManager>,
     // Removed unused field ffmpeg_manager
 }
 
 impl WebRTCAdapter {
-    pub fn new() -> Self {
+    pub fn new(xvfb_manager: Arc<XvfbManager>) -> Self {
         Self {
             peers: Arc::new(RwLock::new(HashMap::new())),
             tracks: Arc::new(RwLock::new(HashMap::new())),
             cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
             ffmpeg_handles: Arc::new(RwLock::new(HashMap::new())),
             input_manager: Arc::new(X11InputManager::new()),
+            xvfb_manager,
             // ffmpeg_manager removed
         }
     }
     
 
-    async fn create_peer_connection(&self, session_id: &str, ws_sender: Arc<tokio::sync::Mutex<SplitSink<WebSocket, Message>>>) -> Result<(Arc<RTCPeerConnection>, Arc<TrackLocalStaticSample>)> {
+    async fn create_peer_connection(&self, session_id: &str, ws_sender: Arc<tokio::sync::Mutex<SplitSink<WebSocket, Message>>>, gstreamer: Arc<GStreamerManager>, config: &crate::domain::aggregates::VideoConfig) -> Result<(Arc<RTCPeerConnection>, Arc<TrackLocalStaticSample>)> {
         // Create media engine
         let mut media_engine = MediaEngine::default();
         
@@ -115,7 +119,7 @@ impl WebRTCAdapter {
         let turn_username = std::env::var("TURN_USERNAME").unwrap_or_else(|_| "sandbox".to_string());
         let turn_credential = std::env::var("TURN_CREDENTIAL").unwrap_or_else(|_| "dev_turn_secret".to_string());
         
-        let config = RTCConfiguration {
+        let rtc_config = RTCConfiguration {
             ice_servers: vec![
                 RTCIceServer {
                     urls: vec!["stun:stun.l.google.com:19302".to_owned()],
@@ -130,10 +134,10 @@ impl WebRTCAdapter {
             ],
             ..Default::default()
         };
-        
+
         // Create peer connection
-        let peer_connection = Arc::new(api.new_peer_connection(config).await?);
-        
+        let peer_connection = Arc::new(api.new_peer_connection(rtc_config).await?);
+
         // Create video track
         let video_track = Arc::new(TrackLocalStaticSample::new(
             RTCRtpCodecCapability {
@@ -146,33 +150,67 @@ impl WebRTCAdapter {
             "video".to_owned(),
             "webrtc-rs".to_owned(),
         ));
-        
+
         // Add track to peer connection
         peer_connection
             .add_track(Arc::clone(&video_track) as Arc<dyn TrackLocal + Send + Sync>)
             .await?;
-        
-        // Start frame sender task with cancellation token
+
+        // Start GStreamer pipeline and stream frames to WebRTC track
         let cancel_token = CancellationToken::new();
         let track_clone = Arc::clone(&video_track);
         let token_clone = cancel_token.clone();
         let session_id_string = session_id.to_string();
-        let ffmpeg_handles_clone = Arc::clone(&self.ffmpeg_handles);
-        
+        // Retrieve session-specific display string from XvfbManager
+        // Use the XvfbManager instance passed to this function
+        let display_str = match self.xvfb_manager.get_display_str(session_id).await {
+            Some(d) => d,
+            None => {
+                error!("[session {}] No display found in XvfbManager for session; cannot start GStreamer pipeline", session_id);
+                return Err(anyhow::anyhow!("No display found for session {}", session_id));
+            }
+        };
+        let width = config.width;
+        let height = config.height;
+        let framerate = config.framerate;
+        let gstreamer = Arc::clone(&gstreamer);
+
         tokio::spawn(async move {
-            // Wait for FFmpeg stdout to be available
-            let ffmpeg_stdout = loop {
-                let mut handles = ffmpeg_handles_clone.write().await;
-                if let Some(stdout) = handles.remove(&session_id_string) {
-                    break stdout;
+            match gstreamer.start_vp8_ivf_stream(&session_id_string, &display_str, width, height, framerate) {
+                Ok(rx) => {
+                    info!("Starting VP8 stream from GStreamer for session: {}", session_id_string);
+                    let mut frame_count = 0u64;
+                    // Read and skip IVF header (32 bytes)
+                        if let Ok(header) = rx.recv() {
+                            // header: Vec<u8>
+                        if header.len() == 32 {
+                            // IVF header received and skipped
+                        }
+                    }
+                        while let Ok(frame_data) = rx.recv() {
+                            // frame_data: Vec<u8>
+                        if token_clone.is_cancelled() {
+                            info!("Video stream cancelled after {} frames", frame_count);
+                            break;
+                        }
+                        if let Err(e) = track_clone.write_sample(&webrtc::media::Sample {
+                            data: frame_data.into(),
+                            duration: std::time::Duration::from_millis(33), // ~30fps
+                            ..Default::default()
+                        }).await {
+                            warn!("Failed to send VP8 sample: {}", e);
+                        } else {
+                            frame_count += 1;
+                            if frame_count % 30 == 0 {
+                                debug!("Streamed {} VP8 frames", frame_count);
+                            }
+                        }
+                    }
+                    info!("VP8 stream ended after {} frames", frame_count);
                 }
-                drop(handles);
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            };
-            
-            info!("Starting VP8 stream for session: {}", session_id_string);
-            if let Err(e) = stream_vp8_to_track(ffmpeg_stdout, track_clone, token_clone).await {
-                error!("VP8 streaming error: {}", e);
+                Err(e) => {
+                    error!("Failed to start GStreamer VP8 stream: {}", e);
+                }
             }
         });
         
@@ -228,11 +266,11 @@ impl WebRTCAdapter {
         Ok((peer_connection, video_track))
     }
 
-    async fn handle_request_offer(&self, session_id: &str, ws_sender: Arc<tokio::sync::Mutex<SplitSink<WebSocket, Message>>>) -> Result<String> {
+    async fn handle_request_offer(&self, session_id: &str, ws_sender: Arc<tokio::sync::Mutex<SplitSink<WebSocket, Message>>>, gstreamer: Arc<GStreamerManager>, config: &crate::domain::aggregates::VideoConfig) -> Result<String> {
         info!("Creating WebRTC offer for session: {}", session_id);
         
         // Create peer connection
-        let (peer_connection, video_track) = self.create_peer_connection(session_id, ws_sender).await?;
+        let (peer_connection, video_track) = self.create_peer_connection(session_id, ws_sender, gstreamer, config).await?;
         
         // Create offer
         let offer = peer_connection.create_offer(None).await?;
@@ -343,7 +381,11 @@ pub async fn ws_handler(
 async fn handle_socket(socket: WebSocket, adapter: Arc<WebRTCAdapter>, session_id: String) {
     let (sender, mut receiver): (SplitSink<WebSocket, Message>, SplitStream<WebSocket>) = socket.split();
     let sender = Arc::new(tokio::sync::Mutex::new(sender));
-    
+
+    // You must have gstreamer and config available here. For demo, create new ones (replace with real context as needed):
+    let gstreamer = Arc::new(crate::infrastructure::driven::sandbox::GStreamerManager::new().expect("Failed to init GStreamer"));
+    let config = crate::domain::aggregates::VideoConfig::default();
+
     info!("WebSocket connection established for session: {}", session_id);
 
     loop {
@@ -351,7 +393,6 @@ async fn handle_socket(socket: WebSocket, adapter: Arc<WebRTCAdapter>, session_i
             Some(Ok(msg)) => match msg {
                 Message::Text(text) => {
                     debug!("Received message: {}", text);
-                    
                     match serde_json::from_str::<SignalingMessage>(&text) {
                         Ok(message) => {
                             let response = handle_signaling_message(
@@ -359,8 +400,9 @@ async fn handle_socket(socket: WebSocket, adapter: Arc<WebRTCAdapter>, session_i
                                 &session_id,
                                 &adapter,
                                 Arc::clone(&sender),
+                                Arc::clone(&gstreamer),
+                                config.clone(),
                             ).await;
-                            
                             match response {
                                 Ok(Some(msg)) => {
                                     if let Ok(json) = serde_json::to_string(&msg) {
@@ -403,7 +445,7 @@ async fn handle_socket(socket: WebSocket, adapter: Arc<WebRTCAdapter>, session_i
             }
         }
     }
-    
+
     // Cleanup when WebSocket closes or errors occur
     info!("WebSocket handler ending, cleaning up session: {}", session_id);
     let _ = adapter.cleanup(&session_id).await;
@@ -414,6 +456,8 @@ async fn handle_signaling_message(
     session_id: &str,
     adapter: &Arc<WebRTCAdapter>,
     ws_sender: Arc<tokio::sync::Mutex<SplitSink<WebSocket, Message>>>,
+    gstreamer: Arc<GStreamerManager>,
+    config: crate::domain::aggregates::VideoConfig,
 ) -> Result<Option<SignalingMessage>> {
     match message {
                 SignalingMessage::Resize { width, height } => {
@@ -422,7 +466,7 @@ async fn handle_signaling_message(
                     Ok(None)
                 }
         SignalingMessage::RequestOffer => {
-            let sdp = adapter.handle_request_offer(session_id, ws_sender).await?;
+            let sdp = adapter.handle_request_offer(session_id, ws_sender, gstreamer, &config).await?;
             Ok(Some(SignalingMessage::Offer { sdp }))
         }
         SignalingMessage::Answer { sdp } => {

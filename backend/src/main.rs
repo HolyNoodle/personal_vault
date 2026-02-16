@@ -1,3 +1,4 @@
+use infrastructure::driven::user_repository::PostgresUserRepository;
 use infrastructure::AppState;
 use axum::{
     routing::get,
@@ -12,10 +13,11 @@ mod application;
 mod infrastructure;
 
 use infrastructure::driving::{WebRTCAdapter};
-use infrastructure::driven::{XvfbManager, FfmpegManager, InMemoryVideoSessionRepository, IpcSocketServer};
+use infrastructure::driven::{XvfbManager, GStreamerManager, InMemoryVideoSessionRepository, IpcSocketServer};
 use infrastructure::driven::persistence::{PostgresCredentialRepository, RedisChallengeRepository};
 use infrastructure::driving::http::video_api::{ApiState, create_video_api_router};
-use infrastructure::driving::http::application_routes::AppHandlerState;
+// Removed legacy AppHandlerState import.
+use axum::routing::post;
 use infrastructure::driving::http::auth;
 use application::client::commands::{CreateSessionHandler, TerminateSessionHandler};
 use application::ports::{CredentialRepository, ChallengeRepository};
@@ -59,7 +61,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✅ Database migrations completed");
     
     // Initialize auth repositories
-    // user_repo removed
+    let user_repo = Arc::new(
+        PostgresUserRepository::new(pool.clone())
+    ) as Arc<dyn crate::application::ports::user_repository::UserRepository>;
     let credential_repo = Arc::new(PostgresCredentialRepository::new(pool)) as Arc<dyn CredentialRepository>;
     
     // Initialize Redis challenge repository
@@ -74,6 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app_state = AppState {
         webauthn,
         jwt_secret,
+        user_repo,
         credential_repo,
         challenge_repo,
     };
@@ -81,10 +86,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize infrastructure adapters (hexagonal architecture - driven adapters)
     let session_repo = Arc::new(InMemoryVideoSessionRepository::new());
     let sandbox = Arc::new(XvfbManager::new());
-    let streaming = Arc::new(FfmpegManager::new());
+    let streaming = Arc::new(GStreamerManager::new().expect("Failed to initialize GStreamerManager"));
 
     // Pass ffmpeg_manager to WebRTCAdapter
-    let _webrtc_adapter = Arc::new(WebRTCAdapter::new());
+    let _webrtc_adapter = Arc::new(WebRTCAdapter::new(sandbox.clone()));
     
     // Initialize application layer (command handlers)
     let create_session_handler = Arc::new(CreateSessionHandler::new(
@@ -100,21 +105,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     
     // Initialize driving adapters (needed by application platform)
-    let webrtc_adapter = Arc::new(WebRTCAdapter::new());
+    let webrtc_adapter = Arc::new(WebRTCAdapter::new(sandbox.clone()));
     
     // Initialize APPLICATION PLATFORM infrastructure
     // Removed initialization of deleted trait objects and ApplicationLauncherService::new with deleted fields
     
-    // Create application handler state
-    let app_handler_state = AppHandlerState {
-        // Removed launcher_service reference
-    };
+    // Legacy AppHandlerState removed. Use Arc<ApiState> for all application routes.
     
     // Create API state
     let api_state = Arc::new(ApiState {
         create_session_handler,
         terminate_session_handler,
         webrtc_adapter: Arc::clone(&webrtc_adapter),
+        gstreamer: streaming.clone(),
+        xvfb_manager: sandbox.clone(),
     });
     
     // Build router (hexagonal architecture - driving adapters)
@@ -135,7 +139,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Auth routes with AppState
     let auth_routes = auth::setup_routes()
-        .with_state(app_state);
+        .with_state(app_state.clone());
     
     // WebSocket route with WebRTCAdapter state
     let ws_routes = Router::new()
@@ -144,8 +148,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Application platform routes
     let app_routes = Router::new()
-        // .route("/api/applications", axum::routing::get(list_applications))
-        .with_state(app_handler_state);
+        .route("/api/applications", get(infrastructure::driving::http::application_routes::list_applications))
+        .route("/api/applications/launch", post(infrastructure::driving::http::application_routes::launch_application))
+        .with_state(api_state.clone());
     
     // Merge all routes
     let app = Router::new()

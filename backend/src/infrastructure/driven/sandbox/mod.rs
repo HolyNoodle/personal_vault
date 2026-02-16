@@ -3,5 +3,6 @@ pub mod ffmpeg;
 pub mod isolation;
 
 pub use xvfb::XvfbManager;
-pub use ffmpeg::FfmpegManager;
-// Removed unused import: MockSandboxIsolation
+
+pub mod gstreamer;
+pub use gstreamer::GStreamerManager;

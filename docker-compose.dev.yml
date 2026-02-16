@@ -79,6 +79,9 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile.dev
+      args:
+        USER_ID: 1000
+        GROUP_ID: 1000
     container_name: sandbox-backend-dev
     ports:
       - "8080:8080"
@@ -94,10 +97,9 @@ services:
       - TURN_CREDENTIAL=dev_turn_secret
     volumes:
       - ./:/app
-      - ./target:/app/target
       - /home/holynoodle/Downloads:/data/storage
       - ipc_socket:/tmp/ipc
-      - cargo_cache:/usr/local/cargo/registry
+      - cargo_cache:/usr/local/cargo
     depends_on:
       postgres:
         condition: service_healthy

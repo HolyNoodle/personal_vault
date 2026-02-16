@@ -36,7 +36,7 @@ function App() {
     try {
       const response = await fetch('http://localhost:8080/api/setup/status');
       const data = await response.json();
-      setNeedsSetup(data.needs_setup);
+      setNeedsSetup(data.initialized === false);
     } catch (error) {
       console.error('Failed to check setup status:', error);
     } finally {

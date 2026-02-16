@@ -22,14 +22,19 @@ struct XvfbSession {
 }
 
 impl XvfbManager {
+        /// Get the display string for a session, e.g. ":100"
+        pub async fn get_display_str(&self, session_id: &str) -> Option<String> {
+            let displays = self.displays.read().await;
+            displays.get(session_id).map(|s| format!(":{}", s.display_number))
+        }
     pub fn new() -> Self {
         Self {
             displays: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    async fn start_xvfb(&self, session_id: &str, width: u16, height: u16) -> Result<(u16, String, String)> {
-        // Generate a random display number between 100-199
+    pub async fn start_xvfb(&self, session_id: &str, width: u16, height: u16) -> Result<(u16, String, String)> {
+        // Generate a unique display number for session isolation
         let display_number = 100 + (rand::random::<u16>() % 100);
         let display_str = format!(":{}", display_number);
         let resolution = format!("{}x{}x24", width, height);
@@ -58,17 +63,17 @@ impl XvfbManager {
 
         info!("D-Bus session started: {}", dbus_address);
 
-        // Start Xvfb
+        // Start session-specific Xvfb
         let child = Command::new("Xvfb")
             .arg(&display_str)
             .arg("-screen")
             .arg("0")
             .arg(&resolution)
-            .arg("-ac") // Disable access control
+            .arg("-ac")
             .arg("+extension")
             .arg("GLX")
             .arg("+extension")
-            .arg("XTEST") // Enable XTEST for input injection
+            .arg("XTEST")
             .arg("+render")
             .arg("-noreset")
             .stdout(Stdio::null())
@@ -76,7 +81,7 @@ impl XvfbManager {
             .spawn()
             .context("Failed to start Xvfb. Make sure Xvfb is installed.")?;
 
-        info!("Xvfb started on display {} for session {}", display_str, session_id);
+        info!("Session-specific Xvfb started on display {} for session {}", display_str, session_id);
 
         // Give Xvfb time to initialize
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -163,7 +168,7 @@ impl XvfbManager {
         Ok(())
     }
 
-    async fn launch_app(&self, session_id: &str, display_str: &str, command: &str, width: u16, height: u16) -> Result<()> {
+    pub async fn launch_app(&self, session_id: &str, display_str: &str, command: &str, width: u16, height: u16) -> Result<()> {
         debug!("Launching {} on display {} for session {} ({}x{})", command, display_str, session_id, width, height);
 
         // Get D-Bus address from session
@@ -236,45 +241,48 @@ impl XvfbManager {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn();
-match child {
-    Ok(mut child) => {
-        info!("Spawned app process for session {}: command={}, pid={:?}", session_id, command, child.id());
-        // Log child process output for debugging
-        if let Some(stdout) = child.stdout.take() {
-            use tokio::io::AsyncBufReadExt;
-            let reader = tokio::io::BufReader::new(stdout);
-            tokio::spawn(async move {
-                let mut lines = reader.lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    tracing::info!("App stdout: {}", line);
+        match child {
+            Ok(mut child) => {
+                info!("Spawned app process for session {}: command={}, pid={:?}", session_id, command, child.id());
+                // Log child process output for debugging
+                if let Some(stdout) = child.stdout.take() {
+                    use tokio::io::AsyncBufReadExt;
+                    let reader = tokio::io::BufReader::new(stdout);
+                    let command_owned = command.to_string();
+                    tokio::spawn(async move {
+                        let mut lines = reader.lines();
+                        while let Ok(Some(line)) = lines.next_line().await {
+                            tracing::info!("App stdout [{}]: {}", command_owned, line);
+                        }
+                    });
                 }
-            });
-        }
-        if let Some(stderr) = child.stderr.take() {
-            use tokio::io::AsyncBufReadExt;
-            let reader = tokio::io::BufReader::new(stderr);
-            tokio::spawn(async move {
-                let mut lines = reader.lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    tracing::error!("App stderr: {}", line);
+                if let Some(stderr) = child.stderr.take() {
+                    use tokio::io::AsyncBufReadExt;
+                    let reader = tokio::io::BufReader::new(stderr);
+                    let command_owned = command.to_string();
+                    tokio::spawn(async move {
+                        let mut lines = reader.lines();
+                        while let Ok(Some(line)) = lines.next_line().await {
+                            tracing::error!("App stderr [{}]: {}", command_owned, line);
+                        }
+                    });
                 }
-            });
+                // Store the child process to keep it alive
+                let mut displays = self.displays.write().await;
+                if let Some(session) = displays.get_mut(session_id) {
+                    info!("Storing app_process for session {}: pid={:?}", session_id, child.id());
+                    session.app_process = Some(child);
+                } else {
+                    warn!("Session not found when storing app_process for session {}", session_id);
+                }
+                drop(displays);
+            }
+            Err(e) => {
+                error!("Failed to launch app '{}' for session {}: {}", command, session_id, e);
+                tracing::error!("App launch error [{}]: {}", command, e);
+                return Err(anyhow::anyhow!("Failed to launch {}: {}", command, e));
+            }
         }
-        // Store the child process to keep it alive
-        let mut displays = self.displays.write().await;
-        if let Some(session) = displays.get_mut(session_id) {
-            info!("Storing app_process for session {}: pid={:?}", session_id, child.id());
-            session.app_process = Some(child);
-        } else {
-            warn!("Session not found when storing app_process for session {}", session_id);
-        }
-        drop(displays);
-    }
-    Err(e) => {
-        error!("Failed to launch {} for session {}: {}", command, session_id, e);
-        return Err(anyhow::anyhow!("Failed to launch {}: {}", command, e));
-    }
-}
 
         // Maximize GUI applications after a short delay
         if command != "xterm" {

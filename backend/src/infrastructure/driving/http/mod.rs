@@ -1,3 +1,4 @@
+pub mod check_setup_status;
 pub mod auth;
 pub mod files;
 pub mod video_api;

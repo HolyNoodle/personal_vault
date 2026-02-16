@@ -5,5 +5,7 @@ use axum::async_trait;
 
 #[async_trait]
 pub trait UserRepository: Send + Sync {
-    // Removed all unused methods from UserRepository trait
+        async fn count_super_admins(&self) -> Result<u64, String>;
+    async fn save(&self, user: &crate::domain::User) -> Result<(), String>;
+    async fn find_by_email(&self, email: &crate::domain::Email) -> Result<Option<crate::domain::User>, String>;
 }

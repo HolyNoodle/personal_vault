@@ -12,7 +12,7 @@ pub mod driving;   // Input adapters (HTTP, CLI, etc.)
 pub struct AppState {
     pub webauthn: Arc<webauthn_rs::prelude::Webauthn>,
     pub jwt_secret: String,
-    // Removed orphaned user_repo field
+    pub user_repo: Arc<dyn crate::application::ports::user_repository::UserRepository>,
     pub credential_repo: Arc<dyn CredentialRepository>,
     pub challenge_repo: Arc<dyn ChallengeRepository>,
 }

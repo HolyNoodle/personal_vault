@@ -14,6 +14,8 @@ pub struct ApiState {
     pub create_session_handler: Arc<CreateSessionHandler>,
     pub terminate_session_handler: Arc<TerminateSessionHandler>,
     pub webrtc_adapter: Arc<WebRTCAdapter>,
+    pub gstreamer: Arc<crate::infrastructure::driven::sandbox::GStreamerManager>,
+    pub xvfb_manager: Arc<crate::infrastructure::driven::sandbox::XvfbManager>,
 }
 
 pub fn create_video_routes(state: Arc<ApiState>) -> Router {
@@ -46,6 +48,7 @@ async fn create_session(
             .unwrap_or_else(|| "xterm".to_string()),
     };
 
+    tracing::info!("[API] Calling CreateSessionHandler for user_id={}", command.user_id);
     match state.create_session_handler.handle(command, Arc::clone(&state.webrtc_adapter)).await {
         Ok(result) => Ok(Json(json!(result))),
         Err(e) => Err((
