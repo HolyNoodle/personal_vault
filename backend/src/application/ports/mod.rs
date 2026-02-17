@@ -3,7 +3,6 @@
 pub mod user_repository;
 pub mod credential_repository;
 pub mod challenge_repository;
-pub mod video_ports;
 pub mod application_ports;
 
 // Removed pub use for UserRepository

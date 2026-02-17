@@ -1,28 +1,10 @@
 {
   "name": "File Explorer",
-  "version": "0.1.0",
-  "description": "WASM file explorer with egui UI, rendered via embedded wasmtime runtime",
-  "type": "wasm",
-  "wasm_module": "file_explorer.wasm",
+  "version": "0.2.0",
+  "type": "native",
+  "binary": "file_explorer",
   "permissions": [
-    "filesystem:read",
-    "filesystem:write",
-    "filesystem:delete",
-    "ipc:send",
-    "ipc:receive"
+    { "path": ".", "access": ["read", "write", "delete"] }
   ],
-  "capabilities": [
-    "upload",
-    "download",
-    "delete",
-    "preview"
-  ],
-  "exports": {
-    "render_frame": "render_file_explorer_frame",
-    "get_framebuffer_ptr": "get_framebuffer_ptr",
-    "get_framebuffer_size": "get_framebuffer_size",
-    "get_width": "get_width",
-    "get_height": "get_height",
-    "handle_pointer_event": "handle_pointer_event"
-  }
+  "capabilities": ["upload", "download", "delete", "preview"]
 }

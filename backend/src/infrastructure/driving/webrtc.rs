@@ -1,4 +1,4 @@
-use crate::infrastructure::driven::sandbox::wasm_runtime::WasmAppManager;
+use crate::infrastructure::driven::sandbox::native_runtime::NativeAppManager;
 use crate::infrastructure::driven::sandbox::gstreamer::feed_frames_to_appsrc;
 use crate::infrastructure::driven::sandbox::GStreamerManager;
 use anyhow::Result;
@@ -60,16 +60,16 @@ pub struct WebRTCAdapter {
     peers: Arc<RwLock<HashMap<String, Arc<RTCPeerConnection>>>>,
     tracks: Arc<RwLock<HashMap<String, Arc<TrackLocalStaticSample>>>>,
     cancel_tokens: Arc<RwLock<HashMap<String, CancellationToken>>>,
-    wasm_manager: Arc<WasmAppManager>,
+    native_manager: Arc<NativeAppManager>,
 }
 
 impl WebRTCAdapter {
-    pub fn new(wasm_manager: Arc<WasmAppManager>) -> Self {
+    pub fn new(native_manager: Arc<NativeAppManager>) -> Self {
         Self {
             peers: Arc::new(RwLock::new(HashMap::new())),
             tracks: Arc::new(RwLock::new(HashMap::new())),
             cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
-            wasm_manager,
+            native_manager,
         }
     }
 
@@ -150,7 +150,7 @@ impl WebRTCAdapter {
         let framerate = config.framerate;
 
         let frame_rx = self
-            .wasm_manager
+            .native_manager
             .launch_app(session_id, "file-explorer", width, height, framerate)
             .await?;
 
@@ -350,8 +350,8 @@ impl WebRTCAdapter {
         }
         drop(tokens);
 
-        // Cleanup WASM session
-        let _ = self.wasm_manager.cleanup_session(session_id).await;
+        // Cleanup native session
+        let _ = self.native_manager.cleanup_session(session_id).await;
 
         let mut peers = self.peers.write().await;
         let mut tracks = self.tracks.write().await;
@@ -493,7 +493,7 @@ async fn handle_signaling_message(
         SignalingMessage::MouseMove { x, y } => {
             info!("Received MouseMove: x={}, y={}", x, y);
             adapter
-                .wasm_manager
+                .native_manager
                 .handle_pointer_event(session_id, x as f32, y as f32, false)
                 .await;
             Ok(None)
@@ -501,7 +501,7 @@ async fn handle_signaling_message(
         SignalingMessage::MouseDown { button } => {
             info!("Received MouseDown: button={}", button);
             adapter
-                .wasm_manager
+                .native_manager
                 .handle_mouse_button(session_id, button, true)
                 .await;
             Ok(None)
@@ -509,7 +509,7 @@ async fn handle_signaling_message(
         SignalingMessage::MouseUp { button } => {
             info!("Received MouseUp: button={}", button);
             adapter
-                .wasm_manager
+                .native_manager
                 .handle_mouse_button(session_id, button, false)
                 .await;
             Ok(None)
@@ -522,7 +522,7 @@ async fn handle_signaling_message(
         SignalingMessage::KeyDown { key, code } => {
             info!("Received KeyDown: key={}", key);
             adapter
-                .wasm_manager
+                .native_manager
                 .handle_keyboard(session_id, key, code, true)
                 .await;
             Ok(None)
@@ -530,7 +530,7 @@ async fn handle_signaling_message(
         SignalingMessage::KeyUp { key, code } => {
             info!("Received KeyUp: key={}", key);
             adapter
-                .wasm_manager
+                .native_manager
                 .handle_keyboard(session_id, key, code, false)
                 .await;
             Ok(None)

@@ -13,7 +13,7 @@ mod application;
 mod infrastructure;
 
 use infrastructure::driving::{WebRTCAdapter};
-use infrastructure::driven::{WasmAppManager, GStreamerManager, InMemoryVideoSessionRepository, IpcSocketServer};
+use infrastructure::driven::{NativeAppManager, IpcSocketServer};
 use infrastructure::driven::persistence::{PostgresCredentialRepository, RedisChallengeRepository};
 use infrastructure::driving::http::video_api::{ApiState, create_video_api_router};
 use axum::routing::post;
@@ -85,34 +85,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Initialize infrastructure adapters
-    let session_repo = Arc::new(InMemoryVideoSessionRepository::new());
-    let wasm_dir = std::env::var("WASM_DIR").unwrap_or_else(|_| "/app/wasm".to_string());
-    let wasm_manager = Arc::new(WasmAppManager::new(wasm_dir));
-    let streaming = Arc::new(GStreamerManager::new().expect("Failed to initialize GStreamerManager"));
+    let apps_root = std::env::var("APPS_ROOT").unwrap_or_else(|_| "/app/.app".to_string());
+    let native_manager = Arc::new(NativeAppManager::new(apps_root));
 
     // Initialize command handlers
     let create_session_handler = Arc::new(CreateSessionHandler::new(
-        session_repo.clone(),
-        wasm_manager.clone(),
-        streaming.clone(),
+        native_manager.clone(),
     ));
 
     let terminate_session_handler = Arc::new(TerminateSessionHandler::new(
-        session_repo.clone(),
-        wasm_manager.clone(),
-        streaming.clone(),
+        native_manager.clone(),
     ));
 
-    // Initialize WebRTC adapter with WasmAppManager
-    let webrtc_adapter = Arc::new(WebRTCAdapter::new(wasm_manager.clone()));
+    // Initialize WebRTC adapter with NativeAppManager
+    let webrtc_adapter = Arc::new(WebRTCAdapter::new(native_manager.clone()));
 
     // Create API state
     let api_state = Arc::new(ApiState {
         create_session_handler,
         terminate_session_handler,
         webrtc_adapter: Arc::clone(&webrtc_adapter),
-        gstreamer: streaming.clone(),
-        wasm_manager: wasm_manager.clone(),
     });
 
     // Build router

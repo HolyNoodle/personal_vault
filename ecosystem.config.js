@@ -1,17 +1,6 @@
 module.exports = {
   apps: [
     {
-      name: 'file-explorer-build',
-      cwd: '/app',
-      script: 'cargo',
-      args: 'build --release --target wasm32-unknown-unknown -p file-explorer',
-      interpreter: 'none',
-      autorestart: false,
-      watch: false,
-      env: {},
-      wait_ready: false,
-    },
-    {
       name: 'backend',
       cwd: '/app/backend',
       script: 'cargo',
@@ -20,6 +9,7 @@ module.exports = {
       autorestart: true,
       watch: false,
       env: {
+        // Ensure DISPLAY is set for GUI applications so no applications try to render
         "DISPLAY": "",
       },
       wait_ready: false,

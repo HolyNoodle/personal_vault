@@ -3,16 +3,15 @@ name = "file-explorer"
 version.workspace = true
 edition.workspace = true
 
-# Prevent auto-discovery of main.rs as a binary target
 autobins = false
 
-
-[lib]
-crate-type = ["cdylib"]
-path = "src/lib.rs"
-
+[[bin]]
+name = "file_explorer"
+path = "src/main.rs"
 
 [dependencies]
 egui = "0.29"
-epaint = "0.29"
-once_cell = "1.19"
+sandbox-app-sdk = { path = "../../crates/sandbox-app-sdk" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+once_cell = "1"

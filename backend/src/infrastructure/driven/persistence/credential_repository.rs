@@ -70,24 +70,4 @@ impl CredentialRepository for PostgresCredentialRepository {
         
         Ok(())
     }
-    
-    async fn update_sign_count(&self, user_id: &UserId, credential_id: &[u8], sign_count: u32) -> Result<(), String> {
-        let uuid_str = user_id.to_string();
-        let uuid = uuid::Uuid::parse_str(&uuid_str)
-            .map_err(|e| format!("Invalid UUID: {}", e))?;
-        
-        sqlx::query(
-            "UPDATE webauthn_credentials 
-             SET sign_count = $1, updated_at = NOW() 
-             WHERE user_id = $2 AND credential_id = $3"
-        )
-        .bind(sign_count as i64)
-        .bind(uuid)
-        .bind(credential_id)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| format!("Failed to update sign count: {}", e))?;
-        
-        Ok(())
-    }
 }

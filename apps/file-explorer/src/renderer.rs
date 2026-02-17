@@ -1,3 +1,4 @@
+use sandbox_app_sdk::SandboxApp;
 use egui::FontFamily;
 
 pub fn setup_custom_fonts(ctx: &egui::Context) {
@@ -70,9 +71,9 @@ pub extern "C" fn set_size(w: i32, h: i32) {
     }
     log_wasm("[wasm] set_size EXIT");
 }
-use crate::app::{create_file_explorer_app, FileExplorerApp};
+use crate::app::FileExplorerApp;
 use egui;
-use epaint::{ClippedPrimitive, Primitive};
+use egui::epaint::{ClippedPrimitive, Primitive};
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
 
@@ -85,7 +86,7 @@ fn framebuffer_size() -> usize {
 }
 
 static FRAMEBUFFER: Lazy<Mutex<Vec<u8>>> = Lazy::new(|| Mutex::new(vec![0u8; 800 * 600 * 4]));
-static APP: Lazy<Mutex<FileExplorerApp>> = Lazy::new(|| Mutex::new(create_file_explorer_app()));
+static APP: Lazy<Mutex<FileExplorerApp>> = Lazy::new(|| Mutex::new(FileExplorerApp::default()));
 static CTX: Lazy<egui::Context> = Lazy::new(|| {
     log_wasm("[wasm] ===== CTX LAZY INITIALIZATION STARTING =====");
     let ctx = egui::Context::default();

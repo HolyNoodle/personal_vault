@@ -1,6 +1,6 @@
 use axum::debug_handler;
 use axum::extract::State;
-use axum::{Json, routing::get, Router};
+use axum::Json;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use crate::infrastructure::driving::http::video_api::ApiState;
@@ -16,7 +16,7 @@ pub struct ApplicationMetadata {
 pub async fn list_applications() -> Json<Vec<ApplicationMetadata>> {
     let apps = vec![
         ApplicationMetadata {
-            app_id: "file-explorer".to_string(),
+            app_id: "file_explorer".to_string(),
             name: "File Explorer".to_string(),
             description: "Browse and manage files in your sandboxed environment.".to_string(),
         },
@@ -28,13 +28,6 @@ pub async fn list_applications() -> Json<Vec<ApplicationMetadata>> {
 pub struct LaunchApplicationRequest {
     pub app_id: String,
     pub user_id: String,
-    pub user_role: String,
-    pub allowed_paths: Vec<String>,
-    pub video_width: u32,
-    pub video_height: u32,
-    pub video_framerate: u32,
-    pub enable_watermarking: bool,
-    pub timeout_minutes: u32,
 }
 
 #[derive(Serialize)]
@@ -45,7 +38,7 @@ pub struct LaunchApplicationResponse {
 
 #[debug_handler]
 pub async fn launch_application(
-    State(state): State<Arc<ApiState>>,
+    State(_state): State<Arc<ApiState>>,
     Json(payload): Json<LaunchApplicationRequest>,
 ) -> Json<LaunchApplicationResponse> {
     tracing::info!(

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
@@ -41,13 +42,8 @@ impl ApplicationSession {
         }
     }
 
-    /// Mark session as ready (sandbox created, app launched, or browser bundle loaded)
-    pub fn mark_ready(&mut self) {
-        self.state = SessionState::Ready;
-        self.started_at = Some(Utc::now());
-    }
 
-    // Removed unused methods mark_active, update_activity, is_expired, is_idle, terminate, and is_active
+    // Removed unused methods mark_ready, mark_active, update_activity, is_expired, is_idle, terminate, and is_active
 }
 
 /// Session ID value object
@@ -58,7 +54,6 @@ impl SessionId {
     pub fn generate() -> Self {
         Self(Uuid::new_v4().to_string())
     }
-
     // Removed unused methods from_string and as_str
 }
 
@@ -76,10 +71,7 @@ impl AppId {
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
     }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
+    // Removed unused method as_str
 }
 
 impl std::fmt::Display for AppId {

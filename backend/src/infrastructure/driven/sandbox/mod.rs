@@ -1,6 +1,5 @@
-pub mod wasm_runtime;
-pub mod isolation;
+pub mod native_runtime;
+pub use native_runtime::NativeAppManager;
 pub mod gstreamer;
 
-pub use wasm_runtime::WasmAppManager;
 pub use gstreamer::GStreamerManager;

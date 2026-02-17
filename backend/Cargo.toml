@@ -18,8 +18,9 @@ shared = { path = "../shared" }
 gstreamer = { version = "0.22", features = ["v1_22"] }
 gstreamer-app = "0.22"
 
-# WASM runtime
-wasmtime = "29"
+
+# Native runtime dependencies
+nix = { version = "0.28", features = ["mman", "fs", "socket", "process"] }
 
 # Web framework
 axum = { version = "0.7", features = ["macros", "ws"] }
@@ -52,7 +53,6 @@ jsonwebtoken = "9.2"
 # Cryptography
 rand = "0.8"
 
-# Date/Time
 chrono = { version = "0.4", features = ["serde"] }
 
 # UUID

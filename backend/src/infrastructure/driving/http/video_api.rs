@@ -14,8 +14,6 @@ pub struct ApiState {
     pub create_session_handler: Arc<CreateSessionHandler>,
     pub terminate_session_handler: Arc<TerminateSessionHandler>,
     pub webrtc_adapter: Arc<WebRTCAdapter>,
-    pub gstreamer: Arc<crate::infrastructure::driven::sandbox::GStreamerManager>,
-    pub wasm_manager: Arc<crate::infrastructure::driven::sandbox::WasmAppManager>,
 }
 
 pub fn create_video_routes(state: Arc<ApiState>) -> Router {

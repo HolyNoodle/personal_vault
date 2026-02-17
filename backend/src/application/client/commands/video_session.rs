@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use crate::domain::aggregates::{VideoSession, VideoConfig};
-use crate::infrastructure::driven::{InMemoryVideoSessionRepository, WasmAppManager, GStreamerManager};
+use crate::infrastructure::driven::NativeAppManager;
 use crate::infrastructure::driving::WebRTCAdapter;
 
 /// Command to create a new video session
@@ -26,23 +26,11 @@ pub struct CreateSessionResult {
 }
 
 /// Command handler for creating video sessions
-pub struct CreateSessionHandler {
-    session_repo: Arc<InMemoryVideoSessionRepository>,
-    wasm_manager: Arc<WasmAppManager>,
-    streaming: Arc<GStreamerManager>,
-}
+pub struct CreateSessionHandler;
 
 impl CreateSessionHandler {
-    pub fn new(
-        session_repo: Arc<InMemoryVideoSessionRepository>,
-        wasm_manager: Arc<WasmAppManager>,
-        streaming: Arc<GStreamerManager>,
-    ) -> Self {
-        Self {
-            session_repo,
-            wasm_manager,
-            streaming,
-        }
+    pub fn new(_: Arc<NativeAppManager>) -> Self {
+        Self
     }
 
     pub async fn handle(&self, command: CreateSessionCommand, _webrtc_adapter: Arc<WebRTCAdapter>) -> Result<CreateSessionResult> {
@@ -77,27 +65,21 @@ pub struct TerminateSessionCommand {
 }
 
 pub struct TerminateSessionHandler {
-    session_repo: Arc<InMemoryVideoSessionRepository>,
-    wasm_manager: Arc<WasmAppManager>,
-    streaming: Arc<GStreamerManager>,
+    native_manager: Arc<NativeAppManager>,
 }
 
 impl TerminateSessionHandler {
     pub fn new(
-        session_repo: Arc<InMemoryVideoSessionRepository>,
-        wasm_manager: Arc<WasmAppManager>,
-        streaming: Arc<GStreamerManager>,
+        native_manager: Arc<NativeAppManager>,
     ) -> Self {
         Self {
-            session_repo,
-            wasm_manager,
-            streaming,
+            native_manager,
         }
     }
 
     pub async fn handle(&self, command: TerminateSessionCommand) -> Result<()> {
         tracing::info!("Terminating session: {}", command.session_id);
-        self.wasm_manager.cleanup_session(&command.session_id).await?;
+        self.native_manager.cleanup_session(&command.session_id).await?;
         Ok(())
     }
 }

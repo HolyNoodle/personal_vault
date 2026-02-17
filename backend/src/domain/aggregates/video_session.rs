@@ -14,6 +14,7 @@ pub struct VideoSession {
     pub ended_at: Option<DateTime<Utc>>,
 }
 
+
 impl VideoSession {
     /// Create a new video session
     pub fn new(user_id: String, config: VideoConfig) -> Self {
@@ -27,22 +28,7 @@ impl VideoSession {
             ended_at: None,
         }
     }
-
-    /// Mark session as ready
-    pub fn mark_ready(&mut self) {
-        self.state = SessionState::Ready;
-        self.started_at = Some(Utc::now());
-    }
-
-    /// Mark session as active (WebRTC connected)
-
-    /// Terminate the session
-    pub fn terminate(&mut self) {
-        self.state = SessionState::Terminated;
-        self.ended_at = Some(Utc::now());
-    }
-
-    // Removed unused methods mark_active and is_active
+    // Removed unused methods mark_ready, mark_active, terminate, and is_active
 }
 
 /// Session state
@@ -63,13 +49,8 @@ impl VideoSessionId {
         Self(Uuid::new_v4().to_string())
     }
 
-    pub fn from_string(id: String) -> Self {
-        Self(id)
-    }
 
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
+    // Removed unused methods from_string and as_str
 }
 
 impl std::fmt::Display for VideoSessionId {

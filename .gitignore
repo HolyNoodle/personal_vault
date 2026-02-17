@@ -94,3 +94,4 @@ temp/
 .vscode-server
 .gnupg
 .ssh
+.app
