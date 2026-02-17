@@ -4,27 +4,14 @@
   "private": true,
   "description": "Secure file sandbox server with WebRTC streaming and Landlock LSM",
   "workspaces": [
-    "frontend/web"
+    "frontend/web",
+    "backend",
+    "crates/sandbox-app-sdk",
+    "apps/file-explorer"
   ],
   "scripts": {
-    "predev": "node scripts/setup-env.js development",
-    "dev": "docker compose -f docker-compose.dev.yml up",
-    "dev:build": "docker compose -f docker-compose.dev.yml up --build",
-    "dev:detach": "docker compose -f docker-compose.dev.yml up -d",
-    "dev:stop": "docker compose -f docker-compose.dev.yml down",
-    "dev:clean": "docker compose -f docker-compose.dev.yml down -v",
-    "dev:logs": "docker compose -f docker-compose.dev.yml logs -f",
-
-    "preprod": "node scripts/setup-env.js production",
-    "prod": "docker compose -f docker-compose.prod.yml up -d",
-    "prod:build": "docker compose -f docker-compose.prod.yml up --build -d",
-    "prod:stop": "docker compose -f docker-compose.prod.yml down",
-    "prod:logs": "docker compose -f docker-compose.prod.yml logs -f",
-    "prod:logs:backend": "docker compose -f docker-compose.prod.yml logs -f backend",
-
-    "secrets:generate": "node scripts/generate-secrets.js",
-
-    "start": "pm2 start ecosystem.config.js",
+    
+    "start": "npm run build:apps && pm2 start ecosystem.config.js",
     "stop": "pm2 stop all",
     "restart": "pm2 restart all",
     "logs": "pm2 logs",
@@ -42,7 +29,8 @@
     "db:reset": "docker compose -f docker-compose.dev.yml down -v postgres && npm run dev:detach",
 
     "frontend:build": "cd frontend/web && npm run build",
-    "frontend:install": "cd frontend/web && npm install"
+    "frontend:install": "cd frontend/web && npm install",
+    "build:apps": "npm run --workspaces --if-present build:app"
   },
   "devDependencies": {
     "cross-env": "^7.0.3"

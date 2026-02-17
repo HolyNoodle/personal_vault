@@ -213,20 +213,13 @@ pub fn run<A: SandboxApp>() {
         // Update cached font texture
         for (tex_id, delta) in &full_output.textures_delta.set {
             if *tex_id == egui::TextureId::default() {
-                match &delta.image {
-                    egui::ImageData::Font(font_image) => {
-                        let size = delta.image.size();
-                        let pixels: Vec<egui::Color32> =
-                            font_image.srgba_pixels(None).collect();
-                        font_texture = Some(egui::ColorImage {
-                            size: [size[0], size[1]],
-                            pixels,
-                        });
-                    }
-                    egui::ImageData::Color(color_image) => {
-                        font_texture = Some(color_image.as_ref().clone());
-                    }
-                }
+                let color_image = match &delta.image {
+                    egui::ImageData::Color(img) => img,
+                };
+                let mut img = color_image.as_ref().clone();
+                // egui 0.33.3 requires source_size
+                img.source_size = egui::vec2(img.size[0] as f32, img.size[1] as f32);
+                font_texture = Some(img);
             }
         }
 
@@ -260,11 +253,11 @@ pub fn setup_custom_fonts(ctx: &egui::Context) {
 
     fonts.font_data.insert(
         "DejaVuSans".to_owned(),
-        egui::FontData::from_static(DEJAVU_FONT),
+        egui::FontData::from_static(DEJAVU_FONT).into(),
     );
     fonts.font_data.insert(
         "LiberationSans".to_owned(),
-        egui::FontData::from_static(LIBERATION_FONT),
+        egui::FontData::from_static(LIBERATION_FONT).into(),
     );
 
     if let Some(family) = fonts.families.get_mut(&FontFamily::Proportional) {

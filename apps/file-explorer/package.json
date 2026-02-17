@@ -1,0 +1,8 @@
+{
+  "name": "file_explorer",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build:app": "cargo build -p file-explorer --release && mkdir -p ../../.app/file_explorer && cp ../../target/release/file_explorer ../../.app/file_explorer/file_explorer && cp ./manifest.json ../../.app/file_explorer/manifest.json && cp -r ./assets ../../.app/file_explorer/assets"
+  }
+}

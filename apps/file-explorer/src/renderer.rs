@@ -16,14 +16,14 @@ pub fn setup_custom_fonts(ctx: &egui::Context) {
         log_wasm("[wasm] WARNING: LiberationSans-Regular.ttf is empty!");
     }
 
-    fonts.font_data.insert(
-        "DejaVuSans".to_owned(),
-        egui::FontData::from_static(DEJAVU_FONT),
-    );
-    fonts.font_data.insert(
-        "LiberationSans".to_owned(),
-        egui::FontData::from_static(LIBERATION_FONT),
-    );
+        fonts.font_data.insert(
+            "DejaVuSans".to_owned(),
+            egui::FontData::from_static(DEJAVU_FONT).into(),
+        );
+        fonts.font_data.insert(
+            "LiberationSans".to_owned(),
+            egui::FontData::from_static(LIBERATION_FONT).into(),
+        );
 
     // Set the font for Proportional and Monospace, with fallback
     if let Some(family) = fonts.families.get_mut(&FontFamily::Proportional) {
@@ -170,25 +170,14 @@ pub extern "C" fn render_file_explorer_frame() {
         log_wasm("[wasm] render_file_explorer_frame: before font texture loop");
         for (tex_id, delta) in &textures.set {
             if *tex_id == egui::TextureId::default() {
-                if let egui::ImageData::Font(font_image) = &delta.image {
-                    let size = delta.image.size();
-                    log_wasm(&format!("[wasm] Font texture generated: size={:?}", size));
-                    let pixels: Vec<egui::Color32> = font_image.srgba_pixels(None).collect();
-
-                    // Debug: Check first few pixels of font texture
-                    if pixels.len() > 10 {
-                        log_wasm(&format!("[wasm] Font texture first 10 pixels: {:?}", &pixels[0..10]));
-                    }
-
-                    *FONT_TEXTURE.lock().unwrap() = Some(egui::ColorImage {
-                        size: [size[0], size[1]],
-                        pixels,
-                    });
-                    log_wasm("[wasm] render_file_explorer_frame: after font texture generation");
-                } else if let egui::ImageData::Color(color_image) = &delta.image {
-                    log_wasm("[wasm] Color image texture found in textures.set (unexpected for font)");
-                    *FONT_TEXTURE.lock().unwrap() = Some(color_image.as_ref().clone());
-                }
+                let color_image = match &delta.image {
+                    egui::ImageData::Color(img) => img,
+                };
+                let mut img = color_image.as_ref().clone();
+                let size = img.size;
+                img.source_size = egui::vec2(size[0] as f32, size[1] as f32);
+                *FONT_TEXTURE.lock().unwrap() = Some(img);
+                log_wasm("[wasm] render_file_explorer_frame: after font texture generation");
             }
         }
 
