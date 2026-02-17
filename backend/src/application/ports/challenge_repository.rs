@@ -1,6 +1,6 @@
 // Driven port - Challenge repository (output port)
 
-use axum::async_trait;
+use async_trait::async_trait;
 
 #[async_trait]
 pub trait ChallengeRepository: Send + Sync {

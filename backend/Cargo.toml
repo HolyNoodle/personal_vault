@@ -15,21 +15,21 @@ categories = ["web-programming", "multimedia", "network-programming"]
 shared = { path = "../shared" }
 
 # GStreamer for video encoding
-gstreamer = { version = "0.22", features = ["v1_22"] }
-gstreamer-app = "0.22"
+gstreamer = { version = "0.24", features = ["v1_22"] }
+gstreamer-app = "0.24"
 
 
 # Native runtime dependencies
-nix = { version = "0.28", features = ["mman", "fs", "socket", "process"] }
+nix = { version = "0.31", features = ["mman", "fs", "socket", "process"] }
 
 # Web framework
-axum = { version = "0.7", features = ["macros", "ws"] }
+axum = { version = "0.8", features = ["macros", "ws"] }
 tokio = { version = "1.35", features = ["full"] }
 tokio-util = "0.7"
-tower-http = { version = "0.5", features = ["fs", "trace", "cors"] }
+tower-http = { version = "0.6", features = ["fs", "trace", "cors"] }
 
 # WebRTC
-webrtc = "0.9"
+webrtc = "0.17"
 
 # WebSocket
 futures-util = "0.3"
@@ -44,14 +44,17 @@ sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "migra
 libc = "0.2"
 
 # Redis for WebAuthn challenge storage
-redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
+redis = { version = "1.0", features = ["tokio-comp", "connection-manager"] }
 
 # Authentication (Passwordless)
-webauthn-rs = { version = "0.4", features = ["danger-allow-state-serialisation"] }
-jsonwebtoken = "9.2"
+webauthn-rs = { version = "0.5.4", features = ["danger-allow-state-serialisation"] }
+jsonwebtoken = { version = "10.3", features = ["rust_crypto"] }
+
+# Async trait macro
+async-trait = "0.1"
 
 # Cryptography
-rand = "0.8"
+rand = "0.10"
 
 chrono = { version = "0.4", features = ["serde"] }
 

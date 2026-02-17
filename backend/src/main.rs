@@ -23,6 +23,7 @@ use application::ports::{CredentialRepository, ChallengeRepository};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Install default crypto provider for jsonwebtoken crate
 
     // Minimal logging: info and above
     tracing_subscriber::fmt::init();

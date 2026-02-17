@@ -19,7 +19,7 @@ pub struct ApiState {
 pub fn create_video_routes(state: Arc<ApiState>) -> Router {
     Router::new()
         .route("/sessions", post(create_session))
-        .route("/sessions/:id", axum::routing::delete(terminate_session))
+        .route("/sessions/{id}", axum::routing::delete(terminate_session))
         .with_state(state)
 }
 

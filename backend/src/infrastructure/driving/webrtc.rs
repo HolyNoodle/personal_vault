@@ -19,9 +19,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use webrtc::{
     api::{media_engine::MediaEngine, APIBuilder},
-    ice_transport::{
-        ice_credential_type::RTCIceCredentialType, ice_server::RTCIceServer,
-    },
+    ice_transport::ice_server::RTCIceServer,
     peer_connection::{
         configuration::RTCConfiguration,
         peer_connection_state::RTCPeerConnectionState,
@@ -116,7 +114,7 @@ impl WebRTCAdapter {
                     urls: vec![turn_server],
                     username: turn_username,
                     credential: turn_credential,
-                    credential_type: RTCIceCredentialType::Password,
+                    // credential_type field removed (not present in new webrtc crate)
                 },
             ],
             ..Default::default()
@@ -225,7 +223,7 @@ impl WebRTCAdapter {
                                 };
                                 if let Ok(json) = serde_json::to_string(&msg) {
                                     let mut sender_lock = sender.lock().await;
-                                    let _ = sender_lock.send(Message::Text(json)).await;
+                                    let _ = sender_lock.send(Message::Text(json.into())).await;
                                 }
                             }
                             Err(e) => {
@@ -415,7 +413,7 @@ async fn handle_socket(socket: WebSocket, adapter: Arc<WebRTCAdapter>, session_i
                                 Ok(Some(msg)) => {
                                     if let Ok(json) = serde_json::to_string(&msg) {
                                         let mut sender_lock = sender.lock().await;
-                                        let _ = sender_lock.send(Message::Text(json)).await;
+                                        let _ = sender_lock.send(Message::Text(json.into())).await;
                                     }
                                 }
                                 Ok(None) => {}
@@ -426,7 +424,7 @@ async fn handle_socket(socket: WebSocket, adapter: Arc<WebRTCAdapter>, session_i
                                     };
                                     if let Ok(json) = serde_json::to_string(&error_msg) {
                                         let mut sender_lock = sender.lock().await;
-                                        let _ = sender_lock.send(Message::Text(json)).await;
+                                        let _ = sender_lock.send(Message::Text(json.into())).await;
                                     }
                                 }
                             }

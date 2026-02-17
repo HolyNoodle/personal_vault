@@ -1,6 +1,6 @@
 // Driven port - Credential repository (output port)
 
-use axum::async_trait;
+use async_trait::async_trait;
 use crate::domain::{Credential, UserId};
 
 #[async_trait]

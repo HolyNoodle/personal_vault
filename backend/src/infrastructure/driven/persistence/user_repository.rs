@@ -12,7 +12,7 @@ impl PostgresUserRepository {
     }
 }
 
-use axum::async_trait;
+use async_trait::async_trait;
 use crate::application::ports::user_repository::UserRepository;
 use crate::domain::User;
 

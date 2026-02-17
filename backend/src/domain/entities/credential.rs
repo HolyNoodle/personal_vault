@@ -13,7 +13,7 @@ impl Credential {
     pub fn new(user_id: UserId, passkey: Passkey) -> Self {
         Self {
             user_id,
-            credential_id: passkey.cred_id().0.to_vec(),
+            credential_id: passkey.cred_id().as_ref().to_vec(),
             passkey,
             sign_count: 0,
         }
