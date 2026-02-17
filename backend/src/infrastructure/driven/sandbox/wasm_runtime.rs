@@ -10,6 +10,16 @@ const DEFAULT_WIDTH: u32 = 800;
 const DEFAULT_HEIGHT: u32 = 600;
 const PIXEL_SIZE: u32 = 4; // RGBA8
 
+/// Input event types
+#[derive(Debug, Clone)]
+pub enum InputEvent {
+    PointerMove { x: f32, y: f32, pressed: bool },
+    MouseDown { button: u8 },
+    MouseUp { button: u8 },
+    KeyDown { key: String, code: String },
+    KeyUp { key: String, code: String },
+}
+
 /// Manages WASM application instances, replacing XvfbManager
 pub struct WasmAppManager {
     sessions: Arc<RwLock<HashMap<String, WasmSession>>>,
@@ -19,8 +29,12 @@ pub struct WasmAppManager {
 struct WasmSession {
     cancel_token: CancellationToken,
     frame_sender: Option<mpsc::Sender<Vec<u8>>>,
+    input_sender: Option<mpsc::UnboundedSender<InputEvent>>,
     width: u32,
     height: u32,
+    last_x: Arc<std::sync::Mutex<f32>>,
+    last_y: Arc<std::sync::Mutex<f32>>,
+    button_pressed: Arc<std::sync::Mutex<bool>>,
 }
 
 impl WasmAppManager {
@@ -53,12 +67,17 @@ impl WasmAppManager {
 
         let cancel_token = CancellationToken::new();
         let (frame_tx, frame_rx) = mpsc::channel::<Vec<u8>>(2);
+        let (input_tx, input_rx) = mpsc::unbounded_channel::<InputEvent>();
 
         let session = WasmSession {
             cancel_token: cancel_token.clone(),
             frame_sender: Some(frame_tx.clone()),
+            input_sender: Some(input_tx.clone()),
             width: width as u32,
             height: height as u32,
+            last_x: Arc::new(std::sync::Mutex::new(0.0)),
+            last_y: Arc::new(std::sync::Mutex::new(0.0)),
+            button_pressed: Arc::new(std::sync::Mutex::new(false)),
         };
 
         let mut sessions = self.sessions.write().await;
@@ -76,7 +95,7 @@ impl WasmAppManager {
             let height = height as u32;
             let framerate = framerate as u8;
             let result = tokio::task::spawn_blocking(move || {
-                run_wasm_render_loop(&wasm_path, frame_tx, token, frame_interval, &session_id_owned, width, height, framerate)
+                run_wasm_render_loop(&wasm_path, frame_tx, input_rx, token, frame_interval, &session_id_owned, width, height, framerate)
             })
             .await;
 
@@ -93,16 +112,63 @@ impl WasmAppManager {
     /// Forward a pointer event to the WASM app
     pub async fn handle_pointer_event(
         &self,
-        _session_id: &str,
-        _x: f32,
-        _y: f32,
+        session_id: &str,
+        x: f32,
+        y: f32,
         _pressed: bool,
     ) {
-        // Input forwarding requires calling into the WASM instance.
-        // For now, pointer events are collected but the WASM instance
-        // runs in a separate blocking thread. A proper implementation
-        // would use a channel to send input events to the render loop.
-        // This is a TODO for full input support.
+        let sessions = self.sessions.read().await;
+        if let Some(session) = sessions.get(session_id) {
+            // Update last known position
+            *session.last_x.lock().unwrap() = x;
+            *session.last_y.lock().unwrap() = y;
+
+            // Get current button state
+            let pressed = *session.button_pressed.lock().unwrap();
+
+            if let Some(input_sender) = &session.input_sender {
+                let _ = input_sender.send(InputEvent::PointerMove { x, y, pressed });
+            }
+        }
+    }
+
+    /// Forward a mouse button event to the WASM app
+    pub async fn handle_mouse_button(&self, session_id: &str, button: u8, pressed: bool) {
+        let sessions = self.sessions.read().await;
+        if let Some(session) = sessions.get(session_id) {
+            // Update button state
+            *session.button_pressed.lock().unwrap() = pressed;
+
+            // Get current position
+            let x = *session.last_x.lock().unwrap();
+            let y = *session.last_y.lock().unwrap();
+
+            if let Some(input_sender) = &session.input_sender {
+                // Send both the button event and a position update with new pressed state
+                let event = if pressed {
+                    InputEvent::MouseDown { button }
+                } else {
+                    InputEvent::MouseUp { button }
+                };
+                let _ = input_sender.send(event);
+                let _ = input_sender.send(InputEvent::PointerMove { x, y, pressed });
+            }
+        }
+    }
+
+    /// Forward a keyboard event to the WASM app
+    pub async fn handle_keyboard(&self, session_id: &str, key: String, code: String, pressed: bool) {
+        let sessions = self.sessions.read().await;
+        if let Some(session) = sessions.get(session_id) {
+            if let Some(input_sender) = &session.input_sender {
+                let event = if pressed {
+                    InputEvent::KeyDown { key, code }
+                } else {
+                    InputEvent::KeyUp { key, code }
+                };
+                let _ = input_sender.send(event);
+            }
+        }
     }
 
     pub async fn cleanup_session(&self, session_id: &str) -> Result<()> {
@@ -120,6 +186,7 @@ impl WasmAppManager {
 fn run_wasm_render_loop(
     wasm_path: &str,
     frame_tx: mpsc::Sender<Vec<u8>>,
+    mut input_rx: mpsc::UnboundedReceiver<InputEvent>,
     cancel_token: CancellationToken,
     frame_interval: std::time::Duration,
     session_id: &str,
@@ -183,6 +250,16 @@ fn run_wasm_render_loop(
     let set_height = instance.get_typed_func::<i32, ()>(&mut store, "set_height").ok();
     let set_framerate = instance.get_typed_func::<i32, ()>(&mut store, "set_framerate").ok();
 
+    // Get handle_pointer_event function for input forwarding
+    let handle_pointer_event = instance
+        .get_typed_func::<(f32, f32, u32), ()>(&mut store, "handle_pointer_event")
+        .ok();
+
+    // Get handle_key_event function for keyboard input
+    let handle_key_event = instance
+        .get_typed_func::<(u32, u32, u32), ()>(&mut store, "handle_key_event")
+        .ok();
+
     // Set rendering parameters if the WASM module supports it
     if let Some(set_size) = &set_size {
         let _ = set_size.call(&mut store, (width as i32, height as i32));
@@ -220,6 +297,63 @@ fn run_wasm_render_loop(
         }
 
         let start = std::time::Instant::now();
+
+        // Process all pending input events
+        while let Ok(input_event) = input_rx.try_recv() {
+            match input_event {
+                InputEvent::PointerMove { x, y, pressed } => {
+                    if let Some(ref handle_ptr) = handle_pointer_event {
+                        let pressed_u32 = if pressed { 1 } else { 0 };
+                        if let Err(e) = handle_ptr.call(&mut store, (x, y, pressed_u32)) {
+                            warn!("[session {}] handle_pointer_event failed: {}", session_id, e);
+                        }
+                    }
+                }
+                InputEvent::MouseDown { button } => {
+                    debug!("[session {}] Mouse button {} down", session_id, button);
+                    // Button state is tracked and sent via PointerMove events
+                }
+                InputEvent::MouseUp { button } => {
+                    debug!("[session {}] Mouse button {} up", session_id, button);
+                    // Button state is tracked and sent via PointerMove events
+                }
+                InputEvent::KeyDown { key, code } => {
+                    debug!("[session {}] Key down: {} ({})", session_id, key, code);
+                    if let Some(ref handle_key) = handle_key_event {
+                        // Allocate space in WASM memory for the key string
+                        let key_bytes = key.as_bytes();
+                        let mem_data = memory.data_mut(&mut store);
+
+                        // Write key to a temporary location in memory (use offset 0 for simplicity)
+                        // In production, you'd want proper memory management
+                        if key_bytes.len() < 1000 && mem_data.len() > key_bytes.len() {
+                            mem_data[0..key_bytes.len()].copy_from_slice(key_bytes);
+
+                            if let Err(e) = handle_key.call(&mut store, (0, key_bytes.len() as u32, 1)) {
+                                warn!("[session {}] handle_key_event failed: {}", session_id, e);
+                            }
+                        }
+                    }
+                }
+                InputEvent::KeyUp { key, code } => {
+                    debug!("[session {}] Key up: {} ({})", session_id, key, code);
+                    if let Some(ref handle_key) = handle_key_event {
+                        // Allocate space in WASM memory for the key string
+                        let key_bytes = key.as_bytes();
+                        let mem_data = memory.data_mut(&mut store);
+
+                        // Write key to a temporary location in memory
+                        if key_bytes.len() < 1000 && mem_data.len() > key_bytes.len() {
+                            mem_data[0..key_bytes.len()].copy_from_slice(key_bytes);
+
+                            if let Err(e) = handle_key.call(&mut store, (0, key_bytes.len() as u32, 0)) {
+                                warn!("[session {}] handle_key_event failed: {}", session_id, e);
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // Call render function
         if let Err(e) = render_frame.call(&mut store, ()) {

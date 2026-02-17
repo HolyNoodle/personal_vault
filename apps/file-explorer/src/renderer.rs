@@ -100,6 +100,7 @@ static FONT_TEXTURE: Lazy<Mutex<Option<egui::ColorImage>>> = Lazy::new(|| Mutex:
 static POINTER_POS: Lazy<Mutex<egui::Pos2>> =
     Lazy::new(|| Mutex::new(egui::Pos2::new(0.0, 0.0)));
 static POINTER_PRESSED: Lazy<Mutex<bool>> = Lazy::new(|| Mutex::new(false));
+static PENDING_EVENTS: Lazy<Mutex<Vec<egui::Event>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
 #[no_mangle]
 pub extern "C" fn render_file_explorer_frame() {
@@ -131,6 +132,11 @@ pub extern "C" fn render_file_explorer_frame() {
                 modifiers: egui::Modifiers::NONE,
             });
         }
+
+        // Add pending keyboard/input events
+        let mut pending = PENDING_EVENTS.lock().unwrap();
+        raw_input.events.extend(pending.drain(..));
+        drop(pending);
 
         // Run egui: this executes the UI logic and returns shapes to paint
         let full_output = ctx.run(raw_input, |ctx| {
@@ -274,6 +280,45 @@ pub extern "C" fn render_file_explorer_frame() {
                 }
             }
         }
+
+        // Render cursor at pointer position
+        let cursor_pos = *POINTER_POS.lock().unwrap();
+        let cursor_x = cursor_pos.x as i32;
+        let cursor_y = cursor_pos.y as i32;
+        log_wasm(&format!("[wasm] Rendering cursor at ({}, {})", cursor_x, cursor_y));
+
+        // Draw a simple crosshair cursor (white with black outline for visibility)
+        let cursor_size: i32 = 10;
+        for dy in -cursor_size..=cursor_size {
+            for dx in -cursor_size..=cursor_size {
+                // Draw crosshair pattern: vertical and horizontal lines
+                if (dx == 0 || dy == 0) && (dx.abs() <= cursor_size && dy.abs() <= cursor_size) {
+                    let px = cursor_x + dx;
+                    let py = cursor_y + dy;
+
+                    if px >= 0 && px < width as i32 && py >= 0 && py < height as i32 {
+                        let idx = (py as usize * width + px as usize) * 4;
+                        if idx + 3 < fb.len() {
+                            // Draw white crosshair with black center cross for contrast
+                            if dx.abs() <= 1 && dy.abs() <= 1 {
+                                // Black center cross (3x3 pixels at intersection)
+                                fb[idx] = 0;       // R
+                                fb[idx + 1] = 0;   // G
+                                fb[idx + 2] = 0;   // B
+                                fb[idx + 3] = 255; // A
+                            } else {
+                                // White outer lines
+                                fb[idx] = 255;     // R
+                                fb[idx + 1] = 255; // G
+                                fb[idx + 2] = 255; // B
+                                fb[idx + 3] = 255; // A
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         log_wasm("[wasm] render_file_explorer_frame: END OF WRAPPED");
     });
     if let Err(_e) = result {
@@ -381,4 +426,92 @@ pub extern "C" fn set_framerate(fps: i32) {
 pub extern "C" fn handle_pointer_event(x: f32, y: f32, pressed: u32) {
     *POINTER_POS.lock().unwrap() = egui::Pos2::new(x, y);
     *POINTER_PRESSED.lock().unwrap() = pressed != 0;
+}
+
+#[no_mangle]
+pub extern "C" fn handle_key_event(key_ptr: *const u8, key_len: usize, pressed: u32) {
+    let key_str = unsafe {
+        std::str::from_utf8(std::slice::from_raw_parts(key_ptr, key_len))
+            .unwrap_or("")
+            .to_string()
+    };
+
+    if let Some(key) = map_key_to_egui(&key_str) {
+        let mut events = PENDING_EVENTS.lock().unwrap();
+        events.push(egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: pressed != 0,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+
+    // Also send as text input if it's a printable character and pressed
+    if pressed != 0 && key_str.len() == 1 {
+        let mut events = PENDING_EVENTS.lock().unwrap();
+        events.push(egui::Event::Text(key_str));
+    }
+}
+
+fn map_key_to_egui(key: &str) -> Option<egui::Key> {
+    match key {
+        "Enter" => Some(egui::Key::Enter),
+        "Escape" => Some(egui::Key::Escape),
+        "Backspace" => Some(egui::Key::Backspace),
+        "Delete" => Some(egui::Key::Delete),
+        "Tab" => Some(egui::Key::Tab),
+        "ArrowLeft" => Some(egui::Key::ArrowLeft),
+        "ArrowRight" => Some(egui::Key::ArrowRight),
+        "ArrowUp" => Some(egui::Key::ArrowUp),
+        "ArrowDown" => Some(egui::Key::ArrowDown),
+        "Home" => Some(egui::Key::Home),
+        "End" => Some(egui::Key::End),
+        "PageUp" => Some(egui::Key::PageUp),
+        "PageDown" => Some(egui::Key::PageDown),
+        "Space" | " " => Some(egui::Key::Space),
+        s if s.len() == 1 => {
+            let ch = s.chars().next()?;
+            match ch {
+                'a' | 'A' => Some(egui::Key::A),
+                'b' | 'B' => Some(egui::Key::B),
+                'c' | 'C' => Some(egui::Key::C),
+                'd' | 'D' => Some(egui::Key::D),
+                'e' | 'E' => Some(egui::Key::E),
+                'f' | 'F' => Some(egui::Key::F),
+                'g' | 'G' => Some(egui::Key::G),
+                'h' | 'H' => Some(egui::Key::H),
+                'i' | 'I' => Some(egui::Key::I),
+                'j' | 'J' => Some(egui::Key::J),
+                'k' | 'K' => Some(egui::Key::K),
+                'l' | 'L' => Some(egui::Key::L),
+                'm' | 'M' => Some(egui::Key::M),
+                'n' | 'N' => Some(egui::Key::N),
+                'o' | 'O' => Some(egui::Key::O),
+                'p' | 'P' => Some(egui::Key::P),
+                'q' | 'Q' => Some(egui::Key::Q),
+                'r' | 'R' => Some(egui::Key::R),
+                's' | 'S' => Some(egui::Key::S),
+                't' | 'T' => Some(egui::Key::T),
+                'u' | 'U' => Some(egui::Key::U),
+                'v' | 'V' => Some(egui::Key::V),
+                'w' | 'W' => Some(egui::Key::W),
+                'x' | 'X' => Some(egui::Key::X),
+                'y' | 'Y' => Some(egui::Key::Y),
+                'z' | 'Z' => Some(egui::Key::Z),
+                '0' => Some(egui::Key::Num0),
+                '1' => Some(egui::Key::Num1),
+                '2' => Some(egui::Key::Num2),
+                '3' => Some(egui::Key::Num3),
+                '4' => Some(egui::Key::Num4),
+                '5' => Some(egui::Key::Num5),
+                '6' => Some(egui::Key::Num6),
+                '7' => Some(egui::Key::Num7),
+                '8' => Some(egui::Key::Num8),
+                '9' => Some(egui::Key::Num9),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }

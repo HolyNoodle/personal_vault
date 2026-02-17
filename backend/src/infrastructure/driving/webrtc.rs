@@ -500,24 +500,39 @@ async fn handle_signaling_message(
         }
         SignalingMessage::MouseDown { button } => {
             info!("Received MouseDown: button={}", button);
-            // TODO: Forward to WASM app via input channel
+            adapter
+                .wasm_manager
+                .handle_mouse_button(session_id, button, true)
+                .await;
             Ok(None)
         }
         SignalingMessage::MouseUp { button } => {
             info!("Received MouseUp: button={}", button);
+            adapter
+                .wasm_manager
+                .handle_mouse_button(session_id, button, false)
+                .await;
             Ok(None)
         }
         SignalingMessage::MouseScroll { delta_y } => {
             info!("Received MouseScroll: delta_y={}", delta_y);
+            // TODO: Forward scroll events to WASM app
             Ok(None)
         }
-        SignalingMessage::KeyDown { key, .. } => {
+        SignalingMessage::KeyDown { key, code } => {
             info!("Received KeyDown: key={}", key);
-            // TODO: Forward to WASM app via input channel
+            adapter
+                .wasm_manager
+                .handle_keyboard(session_id, key, code, true)
+                .await;
             Ok(None)
         }
-        SignalingMessage::KeyUp { key, .. } => {
+        SignalingMessage::KeyUp { key, code } => {
             info!("Received KeyUp: key={}", key);
+            adapter
+                .wasm_manager
+                .handle_keyboard(session_id, key, code, false)
+                .await;
             Ok(None)
         }
         SignalingMessage::Resize { width, height } => {
