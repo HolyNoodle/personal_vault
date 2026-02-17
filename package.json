@@ -14,40 +14,35 @@
     "dev:stop": "docker compose -f docker-compose.dev.yml down",
     "dev:clean": "docker compose -f docker-compose.dev.yml down -v",
     "dev:logs": "docker compose -f docker-compose.dev.yml logs -f",
-    "dev:logs:backend": "docker compose -f docker-compose.dev.yml logs -f backend",
-    "dev:logs:frontend": "docker compose -f docker-compose.dev.yml logs -f frontend",
-    
+
     "preprod": "node scripts/setup-env.js production",
     "prod": "docker compose -f docker-compose.prod.yml up -d",
     "prod:build": "docker compose -f docker-compose.prod.yml up --build -d",
     "prod:stop": "docker compose -f docker-compose.prod.yml down",
     "prod:logs": "docker compose -f docker-compose.prod.yml logs -f",
     "prod:logs:backend": "docker compose -f docker-compose.prod.yml logs -f backend",
-    
-    "db:migrate": "docker exec -it sandbox-backend-dev cargo sqlx migrate run",
-    "db:migrate:prod": "docker exec -it sandbox-backend-prod cargo sqlx migrate run",
-    "db:reset": "docker compose -f docker-compose.dev.yml down -v postgres && npm run dev:detach",
-    
+
     "secrets:generate": "node scripts/generate-secrets.js",
-    
-    "backend:build": "cd backend && cargo build",
-    "backend:test": "cd backend && cargo test",
-    "backend:fmt": "cd backend && cargo fmt",
-    "backend:lint": "cd backend && cargo clippy",
-    
+
+    "start": "pm2 start ecosystem.config.js",
+    "stop": "pm2 stop all",
+    "restart": "pm2 restart all",
+    "logs": "pm2 logs",
+    "status": "pm2 status",
+
+    "check": "cargo check --workspace",
+    "clippy": "cargo clippy --workspace -- -D warnings",
+    "test": "cargo test --workspace",
+    "fmt": "cargo fmt --all -- --check",
+    "wasm": "cargo build -p file-explorer --target wasm32-unknown-unknown",
+    "wasm:release": "cargo build -p file-explorer --target wasm32-unknown-unknown --release",
+
+    "migrate": "cd /app/backend && sqlx migrate run",
+    "migrate:revert": "cd /app/backend && sqlx migrate revert",
+    "db:reset": "docker compose -f docker-compose.dev.yml down -v postgres && npm run dev:detach",
+
     "frontend:build": "cd frontend/web && npm run build",
-    "frontend:test": "cd frontend/web && npm test",
-    "frontend:lint": "cd frontend/web && npm run lint",
-    
-    "build": "npm run backend:build && npm run frontend:build",
-    "test": "npm run backend:test && npm run frontend:test",
-    "lint": "npm run backend:lint && npm run frontend:lint",
-    "format": "npm run backend:fmt",
-    
-    "health": "curl -f http://localhost:8080/health || exit 1",
-    
-    "setup": "npm install && cd frontend/web && npm install",
-    "postinstall": "echo '✅ Dependencies installed. Run npm run dev to start.'"
+    "frontend:install": "cd frontend/web && npm install"
   },
   "devDependencies": {
     "cross-env": "^7.0.3"

@@ -8,39 +8,26 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
     postgresql-client \
-    xvfb \
-    ffmpeg \
-    xterm \
-    thunar \
-    dbus-x11 \
-    wmctrl \
-    openbox \
-    xdotool \
-    libxcb1-dev \
-    libxcb-render0-dev \
-    libxcb-shape0-dev \
-    libxcb-xfixes0-dev \
-    libgtk-3-0 \
-    libx11-6 \
-    libxrandr2 \
-    libxi6 \
-    libxcursor1 \
-    libxinerama1 \
-    libxkbcommon-x11-0 \
-    libxkbcommon0 \
     libglib2.0-dev \
     libgstreamer1.0-dev \
     libgstreamer-plugins-base1.0-dev \
     libgstreamer-plugins-bad1.0-dev \
     gstreamer1.0-tools \
-    gstreamer1.0-x \
     gstreamer1.0-plugins-good \
     gstreamer1.0-plugins-bad \
     gstreamer1.0-plugins-ugly \
+    mold \
+    clang \
+    git \
+    nodejs \
+    npm \
     && rm -rf /var/lib/apt/lists/*
 
 # Install cargo-watch for hot-reloading
 RUN cargo install cargo-watch
+
+# Install Claude Code CLI
+RUN npm install -g @anthropic-ai/claude-code pm2
 
 
 # Set target directory for build cache
@@ -58,8 +45,12 @@ RUN mkdir -p /tmp/ipc && chmod 1777 /tmp/ipc
 # Use host user for permissions
 ARG USER_ID=1000
 ARG GROUP_ID=1000
-RUN useradd -m -u $USER_ID -g $GROUP_ID sandbox || true
+RUN groupadd -g $GROUP_ID sandbox \
+    && useradd -m -u $USER_ID -g $GROUP_ID sandbox
 RUN chown -R $USER_ID:$GROUP_ID /usr/local/cargo
+RUN mkdir -p /app/target /app/frontend/web/node_modules \
+    && chown $USER_ID:$GROUP_ID /app/target /app/frontend/web/node_modules
+
 USER sandbox
 
 # Run with hot-reloading

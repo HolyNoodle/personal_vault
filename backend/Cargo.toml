@@ -16,7 +16,6 @@ shared = { path = "../shared" }
 
 # GStreamer for video encoding
 gstreamer = { version = "0.22", features = ["v1_22"] }
-gstreamer-video = "0.22"
 gstreamer-app = "0.22"
 
 # WASM runtime
@@ -26,17 +25,12 @@ wasmtime = "29"
 axum = { version = "0.7", features = ["macros", "ws"] }
 tokio = { version = "1.35", features = ["full"] }
 tokio-util = "0.7"
-tower = "0.4"
 tower-http = { version = "0.5", features = ["fs", "trace", "cors"] }
-async-trait = "0.1"
 
 # WebRTC
 webrtc = "0.9"
-bytes = "1.5"
 
 # WebSocket
-axum-extra = { version = "0.9", features = ["typed-header"] }
-tokio-tungstenite = "0.21"
 futures-util = "0.3"
 
 # Serialization
@@ -53,7 +47,6 @@ redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
 
 # Authentication (Passwordless)
 webauthn-rs = { version = "0.4", features = ["danger-allow-state-serialisation"] }
-webauthn-rs-proto = "0.4"
 jsonwebtoken = "9.2"
 
 # Cryptography
@@ -68,31 +61,9 @@ uuid = { version = "1.6", features = ["v4", "serde"] }
 # URL parsing
 url = "2.5"
 
-# Environment variables
-dotenvy = "0.15"
-
-# Configuration
-config = "0.14"
-
 # Error handling
 anyhow = "1.0"
-thiserror = "1.0"
 
 # Tracing/Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-# HTTP client (for testing)
-reqwest = { version = "0.11", features = ["json"] }
-
-# Email
-lettre = "0.11"
-
-# Landlock LSM
-landlock = "0.3"
-
-[dev-dependencies]
-# Testing
-testcontainers = "0.15"
-mockall = "0.12"
-proptest = "1.4"

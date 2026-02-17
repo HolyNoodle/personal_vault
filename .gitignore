@@ -87,6 +87,10 @@ temp/
 *.bak
 *.backup
 *~
-.aider*
 
 .cache
+.claude
+.dotnet
+.vscode-server
+.gnupg
+.ssh

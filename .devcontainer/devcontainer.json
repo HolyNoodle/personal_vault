@@ -1,0 +1,32 @@
+{
+  "name": "Sandbox",
+  "dockerComposeFile": "../docker-compose.dev.yml",
+  "service": "workspace",
+  "runServices": ["workspace", "postgres", "redis", "mailhog", "coturn"],
+  "workspaceFolder": "/app",
+  "overrideCommand": true,
+  "forwardPorts": [8080, 5173],
+  "mounts": [
+    "source=${localEnv:HOME}/.gitconfig,target=/app/.gitconfig,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.claude,target=/app/.claude,type=bind,consistency=cached"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "vadimcn.vscode-lldb",
+        "serayuzgur.crates"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "rust-analyzer.cargo.buildScripts.enable": true,
+        "rust-analyzer.check.command": "clippy",
+        "rust-analyzer.procMacro.enable": true,
+        "rust-analyzer.cargo.extraEnv": {
+          "PKG_CONFIG_PATH": "/usr/lib/x86_64-linux-gnu/pkgconfig"
+        }
+      }
+    }
+  }
+}

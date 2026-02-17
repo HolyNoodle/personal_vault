@@ -74,17 +74,18 @@ services:
           cpus: '0.25'
           memory: 128M
 
-  # Rust Backend (Development)
-  backend:
+  # Developer workspace — attach here via devcontainer; run apps with `just`
+  workspace:
     build:
       context: .
-      dockerfile: backend/Dockerfile.dev
+      dockerfile: .devcontainer/Dockerfile
       args:
         USER_ID: 1000
         GROUP_ID: 1000
-    container_name: sandbox-backend-dev
+    container_name: sandbox-workspace-dev
     ports:
       - "8080:8080"
+      - "5173:5173"
     environment:
       - DATABASE_URL=postgresql://sandbox_user:sandbox_dev_password@postgres:5432/sandbox_dev
       - REDIS_URL=redis://redis:6379
@@ -96,7 +97,6 @@ services:
       - TURN_USERNAME=sandbox
       - TURN_CREDENTIAL=dev_turn_secret
       - WASM_DIR=/app/target/wasm32-unknown-unknown/release
-      - HOME=/app
     volumes:
       - ./:/app
       - /home/holynoodle/Downloads:/data/storage
@@ -104,38 +104,16 @@ services:
       - cargo_cache:/usr/local/cargo
       - ./docker_data/fontconfig-cache:/var/cache/fontconfig
       - ./docker_data/backend-cache:/app/cache
+      - target_cache:/app/target
+      - frontend_node_modules:/app/frontend/web/node_modules
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    working_dir: /app/backend
-    command: cargo watch -x run
+    working_dir: /app
+    command: sleep infinity
     user: "1000:1000"
-
-  # Frontend (Development)
-  frontend:
-    build:
-      context: ./frontend/web
-      dockerfile: Dockerfile.dev
-    container_name: sandbox-frontend-dev
-    environment:
-      - VITE_API_URL=http://localhost:8080
-      - VITE_WS_URL=ws://localhost:8080/ws
-    ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend/web:/app
-      - /app/node_modules
-    command: npm run dev -- --host 0.0.0.0
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
 
 volumes:
   postgres_data:
@@ -143,6 +121,7 @@ volumes:
   cargo_cache:
   target_cache:
   ipc_socket:
+  frontend_node_modules:
 
 networks:
   default:
