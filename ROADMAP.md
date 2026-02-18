@@ -85,21 +85,21 @@ On first boot with an empty database, the application is in **uninitialized** st
 **File:** `backend/src/infrastructure/driving/http/check_setup_status.rs`
 
 - [x] `GET /api/setup/status` returns `{ initialized: bool }` based on `count_super_admins() > 0`
-- [ ] Verify: while `initialized = false`, ALL routes except `/api/setup/*` and `/health` return `503 Service Unavailable` (app is not usable until a SuperAdmin exists)
+- [x] Verify: while `initialized = false`, ALL routes except `/api/setup/*` and `/health` return `503 Service Unavailable` (app is not usable until a SuperAdmin exists)
 
 ### 0.2 First SuperAdmin registration
 **File:** `backend/src/application/super_admin/commands/complete_webauthn_registration.rs`
 
 - [x] `POST /api/setup/initiate-registration` — generates WebAuthn challenge
 - [x] `POST /api/setup/complete-registration` — saves user + passkey
-- [ ] **Fix**: assign `roles = [SuperAdmin, Owner]` instead of just `[SuperAdmin]`
-- [ ] **Fix**: after saving user, create owner storage directory `$STORAGE_PATH/{user_id}/` (Phase 2)
-- [ ] Guard: return `409 Conflict` if a SuperAdmin already exists (setup can only run once)
+- [x] **Fix**: assign `roles = [SuperAdmin, Owner]` instead of just `[SuperAdmin]`
+- [x] **Fix**: after saving user, create owner storage directory `$STORAGE_PATH/{user_id}/` (Phase 2)
+- [x] Guard: return `409 Conflict` if a SuperAdmin already exists (setup can only run once)
 
 ### 0.3 Lock setup endpoints after initialization
 **File:** `backend/src/infrastructure/driving/http/auth.rs` or middleware
 
-- [ ] If `count_super_admins() > 0`, `/api/setup/initiate-registration` and `/api/setup/complete-registration` return `403 Forbidden`
+- [x] If `count_super_admins() > 0`, `/api/setup/initiate-registration` and `/api/setup/complete-registration` return `403 Forbidden`
 
 ---
 

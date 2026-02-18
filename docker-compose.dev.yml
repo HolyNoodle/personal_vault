@@ -87,7 +87,6 @@ services:
       - "8080:8080"
       - "5173:5173"
     environment:
-      - DATABASE_URL=postgresql://sandbox_user:sandbox_dev_password@postgres:5432/sandbox_dev
       - REDIS_URL=redis://redis:6379
       - RUST_LOG=debug,tower_http=info,cranelift_codegen=warn,wasmtime=warn,wasmtime_cranelift=warn,webrtc_dtls=error
       - WEBAUTHN_RP_ID=localhost

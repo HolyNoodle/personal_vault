@@ -17,7 +17,7 @@ Adapters that receive requests from outside and drive the application:
 ### Secondary Adapters (Driven/Output)
 Adapters that the application uses to interact with external systems:
 
-- **[PostgreSQL](postgresql.md)** - Relational database persistence
+- **[SQLite](sqlite.md)** - Relational database persistence
 - **[Landlock LSM](landlock.md)** - Linux kernel security enforcement
 - **[WebRTC](webrtc.md)** - Real-time video streaming
 - **[HAProxy](haproxy.md)** - Reverse proxy integration
@@ -49,7 +49,7 @@ Each adapter document includes:
 ### 1. Single Responsibility
 Each adapter has ONE job:
 - HTTP adapter: Handle HTTP requests/responses
-- PostgreSQL adapter: Persist/retrieve data
+- SQLite adapter: Persist/retrieve data
 - Landlock adapter: Enforce filesystem access control
 
 ### 2. Technology Isolation
@@ -66,7 +66,7 @@ Adapters are tested independently:
 ### 4. Swappability
 Adapters can be replaced without changing business logic:
 - Swap Actix-Web → Axum (HTTP framework)
-- Swap PostgreSQL → MySQL (database)
+- Swap SQLite → PostgreSQL (database)
 - Swap SMTP → SendGrid (email provider)
 
 ---
@@ -78,7 +78,7 @@ graph TD
     HTTP[HTTP API] --> App[Application Layer]
     WebAuthn[WebAuthn] --> App
     
-    App --> Postgres[PostgreSQL]
+    App --> SQLite[SQLite]
     App --> Landlock[Landlock LSM]
     App --> WebRTC[WebRTC]
     App --> Email[Email SMTP]
@@ -95,7 +95,7 @@ graph TD
 | Adapter | Technology | Port | Purpose |
 |---------|-----------|------|---------|
 | **HTTP** | Actix-Web/Axum | 8080 | REST API |
-| **PostgreSQL** | sqlx | 5432 | Data persistence |
+| **SQLite** | diesel | - | Data persistence |
 | **Landlock** | Rust + syscalls | - | Filesystem access control |
 | **WebRTC** | webrtc-rs | UDP | Video streaming |
 | **HAProxy** | External | 443 | TLS termination + load balancing |
@@ -109,7 +109,7 @@ graph TD
 
 Recommended implementation sequence:
 
-1. **PostgreSQL** - Basic data persistence
+1. **SQLite** - Basic data persistence
 2. **HTTP API** - Core REST endpoints
 3. **WebAuthn** - Authentication flow
 4. **Landlock** - Security enforcement
