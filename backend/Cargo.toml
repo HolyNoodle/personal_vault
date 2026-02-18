@@ -40,7 +40,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # Database
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "migrate", "chrono", "uuid"] }
+diesel = { version = "2.2", features = ["sqlite", "r2d2"] }
+diesel_migrations = "2.2"
+libsqlite3-sys = { version = "0.27", features = ["bundled"] }
 
 libc = "0.2"
 

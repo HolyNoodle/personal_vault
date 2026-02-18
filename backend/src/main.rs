@@ -1,4 +1,3 @@
-use infrastructure::driven::user_repository::PostgresUserRepository;
 use infrastructure::AppState;
 use axum::{
     routing::get,
@@ -16,10 +15,16 @@ mod infrastructure;
 
 use infrastructure::driving::{WebRTCAdapter};
 use infrastructure::driven::{XvfbManager, IpcSocketServer};
-use infrastructure::driven::persistence::{PostgresCredentialRepository, RedisChallengeRepository};
+use infrastructure::driven::persistence::{SqliteCredentialRepository, RedisChallengeRepository, SqliteUserRepository};
 use axum::routing::post;
 use infrastructure::driving::http::auth;
 use application::ports::{CredentialRepository, ChallengeRepository};
+
+use diesel::r2d2::{self, ConnectionManager};
+use diesel::SqliteConnection;
+use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+
+const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -38,7 +43,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }) {
         tracing::error!("[SHUTDOWN] Failed to set Ctrl-C handler: {}", e);
     }
-    // Install default crypto provider for jsonwebtoken crate
 
     // Minimal logging: info and above
     tracing_subscriber::fmt::init();
@@ -60,28 +64,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap()
     );
 
-    // Initialize database connection pool
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgresql://sandbox_user:sandbox_dev_password@postgres:5432/sandbox_dev".to_string());
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&database_url)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to connect to database: {}", e))?;
+    // Initialize SQLite database connection pool
+    let storage_path = std::env::var("STORAGE_PATH").unwrap();
+    let db_path = format!("{}/internal/db/sandbox.db", storage_path);
 
-    // Run migrations
+    // Create folder if not exist
+    std::fs::create_dir_all(std::path::Path::new(&db_path).parent().unwrap_or(std::path::Path::new("/data/db")))
+          .map_err(|e| anyhow::anyhow!("Failed to create database directory: {}", e))?;
+
+    // Ensure parent directory exists
+    std::fs::create_dir_all(
+        std::path::Path::new(&db_path).parent().unwrap_or(std::path::Path::new("/data/db"))
+    ).map_err(|e| anyhow::anyhow!("Failed to create database directory: {}", e))?;
+
+    let manager = ConnectionManager::<SqliteConnection>::new(&db_path);
+    let pool = r2d2::Pool::builder()
+        .max_size(1)
+        .build(manager)
+        .map_err(|e| anyhow::anyhow!("Failed to create database pool: {}", e))?;
+
+    // Run embedded migrations
     println!("Running database migrations...");
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to run migrations: {}", e))?;
+    let mut conn = pool.get()
+        .map_err(|e| anyhow::anyhow!("Failed to get DB connection: {}", e))?;
+    conn.run_pending_migrations(MIGRATIONS)
+        .map_err(|e| anyhow::anyhow!("Migration failed: {}", e))?;
+    drop(conn);
     println!("Database migrations completed");
 
+    let pool = Arc::new(pool);
+
     // Initialize auth repositories
-    let user_repo = Arc::new(
-        PostgresUserRepository::new(pool.clone())
-    ) as Arc<dyn crate::application::ports::user_repository::UserRepository>;
-    let credential_repo = Arc::new(PostgresCredentialRepository::new(pool)) as Arc<dyn CredentialRepository>;
+    let user_repo = Arc::new(SqliteUserRepository::new(pool.clone()))
+        as Arc<dyn crate::application::ports::user_repository::UserRepository>;
+    let credential_repo = Arc::new(SqliteCredentialRepository::new(pool))
+        as Arc<dyn CredentialRepository>;
 
     // Initialize Redis challenge repository
     let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
@@ -111,9 +128,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create API state
     // ApiState and video session handlers removed
 
-    // Build router
-    let webrtc_clone = Arc::clone(&webrtc_adapter);
-
     // Start IPC socket server for app communication
     let ipc_socket_path = std::env::var("IPC_SOCKET_PATH")
         .unwrap_or_else(|_| "/tmp/sandbox-ipc.sock".to_string());
@@ -134,14 +148,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // WebSocket route with WebRTCAdapter state
     let ws_routes = Router::new()
         .route("/ws", get(infrastructure::driving::webrtc::ws_handler))
-        .with_state(webrtc_clone);
+        .with_state(webrtc_adapter.clone());
 
     // Application platform routes
     let app_routes = Router::new()
         .route("/api/applications", get(infrastructure::driving::http::application_routes::list_applications))
         .route("/api/applications/launch", post(infrastructure::driving::http::application_routes::launch_application));
 
-    // Merge all routes
+    // Custom middleware: 503 if not initialized and not /api/setup/* or /health
+    use axum::{middleware::Next, http::{Request, StatusCode}, response::Response, body::Body};
+
+    async fn require_initialized(req: Request<Body>, next: Next) -> Result<Response, StatusCode> {
+        let path = req.uri().path();
+        // Allow setup and health endpoints always
+        if path.starts_with("/api/setup/") || path == "/api/setup/status" || path == "/health" {
+            return Ok(next.run(req).await);
+        }
+        // Check initialized state
+        let state = req.extensions().get::<AppState>().cloned();
+        if let Some(state) = state {
+            let count = state.user_repo.count_super_admins().await.unwrap_or(0);
+            if count == 0 {
+                return Ok(Response::builder()
+                    .status(StatusCode::SERVICE_UNAVAILABLE)
+                    .body(axum::body::Body::from("Service unavailable: system not initialized"))
+                    .unwrap());
+            }
+        }
+        Ok(next.run(req).await)
+    }
+
     let app = Router::new()
         .merge(auth_routes)
         .merge(ws_routes)
@@ -151,7 +187,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .allow_origin(Any)
                 .allow_methods(Any)
                 .allow_headers(Any)
-        );
+        )
+        .layer(axum::middleware::from_fn(require_initialized));
 
     // Start server
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));

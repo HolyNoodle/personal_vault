@@ -1,43 +1,43 @@
-use sqlx::Type;
+use diesel::prelude::*;
+use crate::infrastructure::driven::persistence::schema::{users, webauthn_credentials};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Type)]
-#[sqlx(type_name = "user_role")]
-pub enum DbUserRole {
-    #[sqlx(rename = "super_admin")]
-    SuperAdmin,
-    #[sqlx(rename = "owner")]
-    Owner,
-    #[sqlx(rename = "client")]
-    Client,
+#[derive(Queryable, Selectable)]
+#[diesel(table_name = users)]
+pub struct DbUser {
+    pub id: String,
+    pub email: String,
+    pub display_name: String,
+    pub roles: String,
+    pub status: String,
 }
 
-impl DbUserRole {
-    pub fn to_domain(&self) -> crate::domain::UserRole {
-        match self {
-            DbUserRole::SuperAdmin => crate::domain::UserRole::SuperAdmin,
-            DbUserRole::Owner => crate::domain::UserRole::Owner,
-            DbUserRole::Client => crate::domain::UserRole::Client,
-        }
-    }
+#[derive(Insertable)]
+#[diesel(table_name = users)]
+pub struct NewDbUser {
+    pub id: String,
+    pub email: String,
+    pub display_name: String,
+    pub roles: String,
+    pub status: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Type)]
-#[sqlx(type_name = "user_status")]
-pub enum DbUserStatus {
-    #[sqlx(rename = "active")]
-    Active,
-    #[sqlx(rename = "suspended")]
-    Suspended,
-    #[sqlx(rename = "deleted")]
-    Deleted,
+#[derive(Queryable, Selectable)]
+#[diesel(table_name = webauthn_credentials)]
+pub struct DbCredential {
+    pub id: String,
+    pub user_id: String,
+    pub credential_id: String,
+    pub public_key: String,
+    pub sign_count: i64,
+    pub created_at: String,
 }
 
-impl DbUserStatus {
-    pub fn to_domain(&self) -> crate::domain::UserStatus {
-        match self {
-            DbUserStatus::Active => crate::domain::UserStatus::Active,
-            DbUserStatus::Suspended => crate::domain::UserStatus::Suspended,
-            DbUserStatus::Deleted => crate::domain::UserStatus::Deleted,
-        }
-    }
+#[derive(Insertable)]
+#[diesel(table_name = webauthn_credentials)]
+pub struct NewDbCredential {
+    pub id: String,
+    pub user_id: String,
+    pub credential_id: String,
+    pub public_key: String,
+    pub sign_count: i64,
 }

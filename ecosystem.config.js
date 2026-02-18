@@ -11,6 +11,7 @@ module.exports = {
       env: {
         // Ensure DISPLAY is set for GUI applications so no applications try to render
         "DISPLAY": "",
+        STORAGE_PATH: "../docker_data/storage",
       },
       wait_ready: false,
       // PM2 does not natively support explicit process dependencies, but you can use pm2's "startOrRestart" with a custom script or use "pm2 start file-explorer-build && pm2 start backend" in your workflow.

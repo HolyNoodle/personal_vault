@@ -77,12 +77,6 @@ temp/
 *.p12
 *.pfx
 
-# Database dumps
-*.sql
-*.db
-*.sqlite
-*.sqlite3
-
 # Backup files
 *.bak
 *.backup

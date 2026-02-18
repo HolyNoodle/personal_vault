@@ -79,12 +79,16 @@ async fn initiate_registration(
     State(state): State<AppState>,
     Json(payload): Json<InitiateRegistrationRequest>,
 ) -> Result<Json<InitiateRegistrationResponse>, (StatusCode, String)> {
+    // Lock setup endpoint if already initialized
+    let count = state.user_repo.count_super_admins().await.unwrap_or(0);
+    if count > 0 {
+        return Err((StatusCode::FORBIDDEN, "Setup is locked: SuperAdmin already exists".to_string()));
+    }
     let result = super_admin_commands::initiate_webauthn_registration::execute(
         &state,
         &payload.email,
         &payload.display_name,
     ).await?;
-    
     Ok(Json(InitiateRegistrationResponse {
         options: result.options,
         challenge_id: result.challenge_id,
@@ -95,6 +99,11 @@ async fn complete_registration(
     State(state): State<AppState>,
     Json(payload): Json<CompleteRegistrationRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    // Lock setup endpoint if already initialized
+    let count = state.user_repo.count_super_admins().await.unwrap_or(0);
+    if count > 0 {
+        return Err((StatusCode::FORBIDDEN, "Setup is locked: SuperAdmin already exists".to_string()));
+    }
     super_admin_commands::complete_webauthn_registration::execute(
         &state,
         &payload.challenge_id,
@@ -102,7 +111,6 @@ async fn complete_registration(
         &payload.email,
         &payload.display_name,
     ).await?;
-    
     Ok(Json(serde_json::json!({ "success": true })))
 }
 

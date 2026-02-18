@@ -5,17 +5,17 @@ pub struct User {
     id: UserId,
     email: Email,
     display_name: DisplayName,
-    role: UserRole,
+    roles: Vec<UserRole>,
     status: UserStatus,
 }
 
 impl User {
-    pub fn new(email: Email, display_name: DisplayName, role: UserRole) -> Self {
+    pub fn new(email: Email, display_name: DisplayName, roles: Vec<UserRole>) -> Self {
         Self {
             id: UserId::new(),
             email,
             display_name,
-            role,
+            roles,
             status: UserStatus::Active,
         }
     }
@@ -24,14 +24,14 @@ impl User {
         id: UserId,
         email: Email,
         display_name: DisplayName,
-        role: UserRole,
+        roles: Vec<UserRole>,
         status: UserStatus,
     ) -> Self {
         Self {
             id,
             email,
             display_name,
-            role,
+            roles,
             status,
         }
     }
@@ -48,8 +48,13 @@ impl User {
         &self.display_name
     }
     
-    pub fn role(&self) -> UserRole {
-        self.role
+
+    pub fn roles(&self) -> &Vec<UserRole> {
+        &self.roles
+    }
+
+    pub fn has_role(&self, role: UserRole) -> bool {
+        self.roles.contains(&role)
     }
     
     pub fn status(&self) -> UserStatus {
