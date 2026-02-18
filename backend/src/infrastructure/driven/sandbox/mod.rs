@@ -1,5 +1,5 @@
-pub mod native_runtime;
-pub use native_runtime::NativeAppManager;
-pub mod gstreamer;
+pub mod xvfb;
+pub use xvfb::XvfbManager;
 
+pub mod gstreamer;
 pub use gstreamer::GStreamerManager;

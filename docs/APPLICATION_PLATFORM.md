@@ -12,33 +12,33 @@ The Secure Sandbox Platform is a sandboxed application hosting system where all 
 
 ### Architecture Overview
 
-**All Users**: Both Owner and Client users access applications the same way - through video streaming
+**All Users**: Both Owner and Client users access applications the same way — through video streaming
 
 **How It Works**:
 ```
-User Browser → WebRTC Video Stream ← Server-Side App ← Isolated Sandbox
-      ↓                                      ↑              (Landlock LSM)
-   Input Events (mouse/keyboard) ────────────┘              Role-based permissions
+Browser → WebRTC (VP8) ← GStreamer ximagesrc :N ← Xvfb :N ← App (any X11 UI)
+   ↓ input events (WS) → xdotool --display :N
 ```
 
 **Execution Flow**:
-1. Backend creates an isolated sandbox: new mount namespace (only selected paths bind-mounted), network namespace, Landlock LSM policy, seccomp filter, cgroups
-2. Sandbox permissions configured based on user role and owner-configured share settings — applied before exec
-3. App binary (native Linux executable) is spawned inside the sandbox; it has no visibility of the host filesystem beyond what was bind-mounted
-4. App renders to an RGBA framebuffer via a shared memory region the backend also maps
-5. Framebuffer pixels are fed into a GStreamer appsrc pipeline, encoded to VP8, and sent as a WebRTC video track (DTLS-SRTP encrypted)
-6. User interacts with video feed — input events are sent back to server over the WebSocket signaling channel and forwarded into the app via a Unix socket
+1. Backend creates sandbox (mount namespace, Landlock, cgroups, seccomp)
+2. Backend starts `Xvfb :N` outside the sandbox; bind-mounts `/tmp/.X11-unix/XN` into the sandbox namespace
+3. Backend starts GStreamer pipeline: `ximagesrc display=:N ! vp8enc ! webrtcbin`
+4. Backend spawns app inside sandbox with `DISPLAY=:N`
+5. App connects to Xvfb and renders with its chosen X11 UI framework
+6. Video stream flows to browser via WebRTC; input events from browser → xdotool → Xvfb
 
 ---
 
 > **Status (WIP)**:
-> - GStreamer VP8 encode + WebRTC video track: **implemented**
-> - WebSocket signaling (offer/answer/ICE + input events): **implemented**
-> - Native process sandbox (mount namespace + Landlock + seccomp): **planned** — current file-explorer is a WASM prototype; production model is native processes
-> - Shared memory framebuffer IPC between app and backend: **planned**
-> - Unix socket input event channel: **planned**
+> - GStreamer VP8 + WebRTC video track: **implemented**
+> - WebSocket signaling + input routing: **implemented**
+> - Xvfb-per-session + ximagesrc capture: **planned**
+> - xdotool input injection: **planned**
+> - Native process sandbox (mount namespace + Landlock): **planned**
+> - File-explorer WASM prototype: **reference only, not production model**
+> - `sandbox-app-sdk`: **planned** (business logic only, no rendering)
 > - WebRTC security hardening (WSS, auth on `/ws`, encrypted TURN, input via data channel): **not yet implemented — see Security Considerations**
-> - `sandbox-app-sdk` crate (rendering loop + input handling for native apps): **planned**
 
 ---
 
@@ -109,24 +109,14 @@ Client permissions are **not a fixed platform-wide policy**. Instead, they are c
 
 ### Technical Implementation
 
-**Current Implementation — WASM + egui + wasmtime**:
+**WASM prototype — reference/prototype only** (`apps/file-explorer/`):
 
-The file explorer is a WASM binary (`cdylib`) built with egui for UI logic. It runs inside a wasmtime runtime on the backend and renders to an RGBA framebuffer that the backend reads each frame.
+The existing file-explorer is a WASM binary built with egui + a software rasterizer + wasmtime. It established the egui render-loop pattern but is **not the production architecture**. It is kept as a reference.
 
-```
-crate-type = ["cdylib"]   (Cargo.toml)
-
-egui 0.29 — immediate-mode UI logic (layout, widgets, input)
-epaint 0.29 — tessellation + software rasterizer (triangle meshes → RGBA pixels)
-```
-
-Key implementation facts:
-- Fonts (DejaVuSans, LiberationSans) are embedded in the WASM binary at compile time via `include_bytes!`
-- The backend calls exported C-ABI functions each frame — no OS threads, no host syscalls unless explicitly imported
-- Input (mouse position, click state, keyboard events) is forwarded from the backend into the app via `handle_pointer_event` / `handle_key_event` exports
-- Framebuffer accessors (`get_framebuffer_ptr`, `get_framebuffer_size`, `get_width`, `get_height`) let the backend read rendered pixels
-
-Reference: `apps/file-explorer/` — `Cargo.toml`, `src/app.rs`, `src/renderer.rs`, `manifest.json`.
+**Production model (target)**:
+- Standard native Linux binary; connects to `Xvfb :N` via the `DISPLAY` environment variable set by the backend
+- Any X11-capable UI framework — GTK4, Iced, Qt, egui+winit, etc.
+- No platform-specific rendering code; no framebuffer accessors; no exported C-ABI frame functions
 
 ---
 
@@ -139,24 +129,36 @@ Apps on this platform are native Linux executables. Isolation is provided by the
 The backend prepares the sandbox before spawning the app process:
 
 1. **Mount namespace** — a new namespace is created; only the paths the session needs are bind-mounted into it. The app's process sees only those paths; the rest of the host filesystem does not exist from its perspective (`ENOENT`, not `EACCES`).
-2. **Landlock LSM** — a ruleset is applied that restricts which of the mounted paths can be opened and with which operations (read, write, delete). This is belt-and-suspenders on top of the mount namespace.
-3. **Network namespace** — no network interfaces; the app is fully offline.
-4. **seccomp** — a syscall allowlist is applied; dangerous syscalls (e.g. `ptrace`, `mount`, `pivot_root`) are blocked.
-5. **cgroups** — CPU, memory, and PID limits are applied to the app's cgroup.
+2. **X11 socket** — `/tmp/.X11-unix/XN` (the Xvfb socket) is bind-mounted into the namespace so the app can connect to its virtual display.
+3. **Landlock LSM** — a ruleset is applied that restricts which of the mounted paths can be opened and with which operations (read, write, delete). This is belt-and-suspenders on top of the mount namespace.
+4. **Network namespace** — no network interfaces; the app is fully offline.
+5. **seccomp** — a syscall allowlist is applied; dangerous syscalls (e.g. `ptrace`, `mount`, `pivot_root`) are blocked.
+6. **cgroups** — CPU, memory, and PID limits are applied to the app's cgroup.
 
 The mount namespace gives the strongest filesystem isolation: paths outside the session's allowlist don't exist, so the app cannot enumerate, stat, or discover them. Landlock prevents access even in edge cases where a path might be visible.
 
-### Per-frame rendering loop
+`Xvfb :N` runs **outside** the sandbox namespace (managed by the backend), so the virtual display server is not part of the app's attack surface.
 
-1. Backend maps a shared memory region (e.g. `memfd`) as the framebuffer
-2. App maps the same region and renders pixels into it each frame (egui → RGBA)
-3. Backend reads the framebuffer and feeds it into GStreamer → VP8 → WebRTC
+### Frame delivery
 
-The shared memory approach is zero-copy — no data is transferred between processes, the backend simply reads what the app wrote.
+1. Backend starts `Xvfb :N` and a GStreamer pipeline: `ximagesrc display=:N fps=30 ! vp8enc ! webrtcbin`
+2. Backend spawns the app inside the sandbox with `DISPLAY=:N`
+3. App renders to the virtual display using its chosen X11 UI framework — no platform-specific rendering code required
+4. GStreamer captures the display, encodes to VP8, and sends it as a WebRTC video track
+
+No shared memory, no custom frame IPC, no framebuffer accessors.
 
 ### Input forwarding
 
-The backend forwards mouse and keyboard events to the app via a **Unix socket** (or pipe). The app reads events from this channel on each iteration of its render loop and feeds them as input to egui.
+The backend receives keyboard and mouse events from the browser over WebSocket and injects them into the Xvfb display using `xdotool`:
+
+```
+xdotool type --display :N "<text>"
+xdotool mousemove --display :N x y
+xdotool click --display :N 1
+```
+
+The app receives normal X11 input events — no special input handling code required.
 
 ### Capabilities available to the app
 
@@ -172,30 +174,19 @@ The security boundary is the sandbox configuration, not the language runtime.
 
 ## Communication Contract
 
-The interface between the platform backend and a running app instance uses two IPC channels and a shared memory framebuffer.
+The interface between the platform backend and a running app instance uses two channels. There is no shared memory framebuffer and no control socket for input.
 
-### Framebuffer (backend ← app)
+### Display (Xvfb X11 protocol)
 
-A `memfd` shared memory region is created by the backend before exec and passed to the app as an open file descriptor. The app maps it and writes RGBA pixels each frame. The backend maps the same region and reads it on its render tick. No data is copied between processes.
+The app connects to `Xvfb :N` via the `DISPLAY=:N` environment variable. Frame capture is handled entirely by GStreamer (`ximagesrc`) on the backend side. The app writes no special rendering code — it is a standard X11 application.
 
-The framebuffer dimensions are sent to the app at startup (and on resize) via the control socket.
+### Input (xdotool → Xvfb)
 
-### Control socket (backend → app)
+Browser input events are received by the backend over WebSocket and injected into the Xvfb display using `xdotool`. The app receives normal X11 input events with no special input handling required.
 
-A Unix socket is created before exec and passed to the app as an open file descriptor. The backend sends length-prefixed messages; the app reads them on each loop iteration.
+### Optional capability socket (app → backend)
 
-**Messages the backend sends to the app:**
-
-| Message | Payload |
-|---------|---------|
-| `Init` | width, height, framerate, session metadata |
-| `Resize` | new width, new height |
-| `PointerMove` | x, y |
-| `PointerButton` | x, y, button, pressed |
-| `KeyEvent` | key string, pressed, modifiers |
-| `Shutdown` | graceful termination signal |
-
-The app may also write messages back on the same socket (e.g. to request a file dialog, notify the backend of an upload, etc.) — this is defined per-app in `manifest.json` capabilities.
+If an app declares capabilities that require backend notifications (e.g. upload complete, download ready), it may communicate with the backend via a thin Unix socket or stdout. This is optional and declared in `manifest.json` `capabilities`. It is **not** a frame channel — only lightweight event messages.
 
 ### What the app declares in `manifest.json`
 
@@ -218,7 +209,7 @@ Example:
 }
 ```
 
-The `permissions` block is what the backend uses to configure the Landlock ruleset and bind mounts for the session. `"path": "."` means the user's storage root; the backend resolves it to the actual session path before applying the policy.
+No `exports` map. No framebuffer accessors. No render function signatures. The `permissions` block is what the backend uses to configure the Landlock ruleset and bind mounts for the session. `"path": "."` means the user's storage root; the backend resolves it to the actual session path before applying the policy.
 
 ### Permission tokens (current)
 
@@ -244,10 +235,10 @@ Configured via the `APPS_ROOT` environment variable:
 $APPS_ROOT/
 ├── file-explorer/
 │   ├── manifest.json        # Required
-│   └── file_explorer        # Required — native Linux executable
+│   └── file_explorer        # Required — native Linux x86_64 executable
 ├── my-custom-app/
 │   ├── manifest.json
-│   ├── my_custom_app        # Native executable
+│   ├── my_custom_app        # Native Linux executable
 │   └── data.db              # Any supporting files the app needs at startup
 ```
 
@@ -270,71 +261,56 @@ $APPS_ROOT/
 
 1. **Create** `apps/my-app/` directory and add it as a workspace member in the root `Cargo.toml`
 
-2. **`Cargo.toml`**:
+2. **`Cargo.toml`**: standard `[[bin]]`; depend on any X11-capable UI framework:
    ```toml
    [[bin]]
    name = "my_app"
 
    [dependencies]
-   egui = "0.29"
-   epaint = "0.29"
-   # sandbox-app-sdk = { path = "../../crates/sandbox-app-sdk" }  # once available
-   # rusqlite = "0.31"   # SQLite, or any other native library — works normally
+   # Pick any X11-capable UI framework, e.g.:
+   # iced = { version = "0.12", features = ["winit"] }
+   # gtk4 = "0.9"
+   # egui + winit + glutin — standard desktop setup
+   # rusqlite = "0.31"  — SQLite, or any other native library
    ```
 
-3. **`manifest.json`**: declare identity, binary filename, required permissions (which paths and access modes), and capabilities.
+3. **`manifest.json`**: declare `name`, `binary`, `permissions`, and `capabilities`. No `exports` map.
+   ```json
+   {
+     "name": "My App",
+     "version": "0.1.0",
+     "type": "native",
+     "binary": "my_app",
+     "permissions": [
+       { "path": ".", "access": ["read"] }
+     ],
+     "capabilities": ["preview"]
+   }
+   ```
 
-4. **`src/main.rs`**:
-   - Read the framebuffer fd and control socket fd from the environment (set by the backend before exec)
-   - Map the shared memory framebuffer
-   - Enter the render loop: read input events from the control socket → run egui → write pixels to framebuffer
-   - The `sandbox-app-sdk` will handle all of this once available; for now, see the SDK section for the planned interface
+4. **`src/main.rs`**: standard X11 application entry point. The backend sets `DISPLAY=:N` before exec — the app reads it from the environment automatically via the X11 client library. No special IPC code needed.
 
-5. **`src/app.rs`**: define your app state and a `show(&mut self, ctx: &egui::Context)` method — identical pattern to the current file-explorer.
+5. **Filesystem access**: use `std::fs` directly. Landlock and the mount namespace enforced by the backend guarantee the app can only access what `manifest.json` declared.
 
-6. **Filesystem access**: use `std::fs` directly. Landlock and the mount namespace enforced by the backend guarantee the app can only access what `manifest.json` declared.
+6. **Build**: `cargo build --release` (native target — no cross-compilation needed)
 
-7. **Build, install, start backend** — see "App Installation & Discovery" above.
+7. **Install**: copy binary + `manifest.json` into `$APPS_ROOT/<app-name>/`, then restart the backend.
 
 ---
 
 ## sandbox-app-sdk crate (planned)
 
-Because apps are native binaries, the SDK is a straightforward Rust library — no host function ABI, no serialization protocol, no WASM-specific complexity. App authors link against it and implement one trait.
+The `sandbox-app-sdk` is a pure business logic library. It contains no rendering code — the rendering framework is the developer's choice.
 
 ### What the SDK provides
 
-**1. Rendering + event loop** — maps the shared framebuffer fd, reads the control socket, drives egui, writes pixels. App authors never touch IPC or framebuffer management directly:
+**1. Manifest types** — strongly-typed structs for parsing and validating `manifest.json`:
 
 ```rust
-use sandbox_app_sdk::SandboxApp;
-
-struct MyApp {
-    items: Vec<std::fs::DirEntry>,
-}
-
-impl SandboxApp for MyApp {
-    fn new() -> Self {
-        // std::fs works directly — Landlock + mount namespace enforce the boundary
-        let items = std::fs::read_dir("/").map(|d| d.flatten().collect()).unwrap_or_default();
-        MyApp { items }
-    }
-
-    fn show(&mut self, ctx: &egui::Context) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            for entry in &self.items {
-                ui.label(entry.file_name().to_string_lossy());
-            }
-        });
-    }
-}
-
-fn main() {
-    sandbox_app_sdk::run::<MyApp>();
-}
+use sandbox_app_sdk::{AppManifest, Permission, Capability};
 ```
 
-**2. Backend message types** — typed wrappers over the control socket protocol so apps can send capability notifications (e.g. upload complete, request file dialog):
+**2. Capability notification helpers** — optional helpers for sending structured events to the backend over stdout or a thin Unix socket:
 
 ```rust
 sandbox_app_sdk::notify::upload_complete(path);
@@ -343,9 +319,10 @@ sandbox_app_sdk::notify::download_ready(path, filename);
 
 ### What the SDK does NOT provide
 
+- Rendering, framebuffer management, or egui integration — apps use their chosen X11 framework directly
 - Filesystem access — apps use `std::fs` directly; Landlock enforces the policy
 - SQLite or database access — apps link whatever they need natively
-- Any abstraction over what the sandbox allows — that is configured by the backend, not the SDK
+- Input handling — apps receive normal X11 events from Xvfb via their UI framework
 
 ### Planned location: `crates/sandbox-app-sdk/`
 
@@ -355,7 +332,7 @@ sandbox_app_sdk::notify::download_ready(path, filename);
 
 ## Architecture Diagrams
 
-> **Note**: The WebRTC signaling channel currently uses plain `ws://` and lacks authentication — production hardening is required (see Security Considerations). The native process sandbox is planned; the current file-explorer is a WASM prototype.
+> **Note**: The WebRTC signaling channel currently uses plain `ws://` and lacks authentication — production hardening is required (see Security Considerations). The file-explorer WASM prototype is reference only; production model is Xvfb + native X11 apps.
 
 ### Flow
 
@@ -374,7 +351,7 @@ sandbox_app_sdk::notify::download_ready(path, filename);
 │                    BACKEND SERVER (Rust/Axum)                    │
 │  ┌─────────────┐  ┌──────────────┐  ┌────────────────────────┐  │
 │  │ App Manager │  │ WebRTC       │  │ Input Event Router     │  │
-│  │             │  │ Signaling    │  │                        │  │
+│  │             │  │ Signaling    │  │ (xdotool --display :N) │  │
 │  └─────────────┘  └──────────────┘  └────────────────────────┘  │
 │         │                 │                      │               │
 │         ∨                 ∨                      ∨               │
@@ -383,24 +360,30 @@ sandbox_app_sdk::notify::download_ready(path, filename);
 │  │  - Namespace creation                                   │    │
 │  │  - Landlock policy application                          │    │
 │  │  - Resource limit enforcement                           │    │
+│  │  - Xvfb :N lifecycle (start/stop/display pool)         │    │
 │  └─────────────────────────────────────────────────────────┘    │
-└──────────────────────────┬───────────────────────────────────────┘
-                           │
-                           ∨
+│         │                 │                                      │
+│         ∨                 ∨                                      │
+│  ┌──────────────┐  ┌──────────────────────────────────────────┐ │
+│  │  Xvfb :N     │  │  GStreamer pipeline                      │ │
+│  │  (virtual    │  │  ximagesrc display=:N fps=30             │ │
+│  │   display)   │  │  → vp8enc → webrtcbin (DTLS-SRTP)       │ │
+│  └──────┬───────┘  └──────────────────────────────────────────┘ │
+│         │ X11 socket bind-mounted into sandbox                   │
+└─────────┼────────────────────────────────────────────────────────┘
+          │
+          ∨
 ┌──────────────────────────────────────────────────────────────────┐
 │              ISOLATED SANDBOX (native process)                   │
 │  ┌────────────────────────────────────────────────────────────┐  │
-│  │  Mount namespace — only session paths are visible         │  │
+│  │  Mount namespace — only session paths + X11 socket visible │  │
 │  │  ┌──────────────────────────────────────────────────────┐ │  │
-│  │  │  Native App binary (e.g. file_explorer)             │ │  │
-│  │  │  - egui UI → RGBA pixels → shared memory framebuffer│ │  │
+│  │  │  Native App binary (any X11 UI framework)           │ │  │
+│  │  │  - DISPLAY=:N set by backend before exec            │ │  │
+│  │  │  - Connects to Xvfb, renders with chosen framework  │ │  │
 │  │  │  - std::fs for file access (SQLite, etc.)           │ │  │
-│  │  │  - reads input events from Unix socket              │ │  │
+│  │  │  - Receives normal X11 input events from Xvfb       │ │  │
 │  │  └──────────────────────────────────────────────────────┘ │  │
-│  └────────────────────────────────────────────────────────────┘  │
-│  ┌────────────────────────────────────────────────────────────┐  │
-│  │  GStreamer appsrc → VP8 encode → WebRTC track (DTLS-SRTP) │  │
-│  │  Signaling: WebSocket (⚠ plain ws://, auth missing)       │  │
 │  └────────────────────────────────────────────────────────────┘  │
 │  ┌────────────────────────────────────────────────────────────┐  │
 │  │  Filesystem view (mount namespace)                        │  │
@@ -413,6 +396,7 @@ sandbox_app_sdk::notify::download_ready(path, filename);
 │  • Syscalls: FILTERED (seccomp allowlist)                        │
 │  • File Access: mount namespace (paths don't exist) + Landlock   │
 │  • Resources: CPU 50%, Memory 512MB, PIDs 100 (cgroups)         │
+│  • Xvfb runs outside sandbox — not in app's attack surface       │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -463,11 +447,12 @@ pub enum SessionState {
 1. Client requests app launch → `POST /api/sessions/launch`
 2. Backend validates permissions and resolves the owner-configured share policy
 3. Backend creates the sandbox: mount namespace, Landlock, seccomp, cgroups
-4. Backend spawns the app binary inside the sandbox; passes framebuffer fd + control socket fd
-5. Backend starts reading the shared framebuffer, feeding frames into GStreamer → VP8
-6. Backend creates WebRTC peer connection, returns session ID + WebRTC offer
-7. Client accepts offer, establishes WebRTC connection
-8. Video stream flows to client; input events flow back over WebSocket → Unix socket → app
+4. Backend starts `Xvfb :N` (outside sandbox) and bind-mounts `/tmp/.X11-unix/XN` into the namespace
+5. Backend starts GStreamer pipeline: `ximagesrc display=:N ! vp8enc ! webrtcbin`
+6. Backend spawns the app binary inside the sandbox with `DISPLAY=:N`
+7. Backend creates WebRTC peer connection, returns session ID + WebRTC offer
+8. Client accepts offer, establishes WebRTC connection
+9. Video stream flows to client; input events flow back over WebSocket → xdotool → Xvfb → app
 
 ---
 
@@ -489,6 +474,8 @@ pub enum SessionState {
 | **IP/topology leak via ICE** | Filter host candidates; use mDNS obfuscation | ⚠ Not done |
 | **Input events over plaintext WS** | Move input to WebRTC encrypted data channel | ⚠ Not done |
 | **Malicious app code** | App code signing, audited app registry | Planned |
+| **Xvfb display hijacking** | Xvfb runs outside sandbox; app sees only its own X11 socket via bind-mount | Planned |
+| **Cross-session display access** | One Xvfb instance per session; display number recycled only after session end | Planned |
 
 ---
 
@@ -501,33 +488,29 @@ pub enum SessionState {
 - [x] File explorer WASM prototype (egui, software rasterizer) — reference only, not production model
 - [ ] WebRTC security hardening (WSS, endpoint auth, encrypted TURN, data channel for input)
 
-### Phase 2: Native process sandbox
+### Phase 2: Xvfb + ximagesrc integration
+- [ ] Xvfb-per-session lifecycle management (start/stop/display number pool)
+- [ ] GStreamer pipeline: `ximagesrc display=:N fps=30 ! vp8enc ! webrtcbin` (replaces appsrc)
+- [ ] xdotool input injection (keyboard + mouse → Xvfb display)
+- [ ] X11 socket bind-mount into sandbox namespace
+
+### Phase 3: Native process sandbox
 - [ ] Sandbox orchestrator: fork + mount namespace + Landlock + seccomp + cgroups applied before exec
-- [ ] Shared memory framebuffer IPC (memfd, mapped by both backend and app)
-- [ ] Unix socket control channel (input events backend → app; notifications app → backend)
-- [ ] App manifest v2 format (`type: "native"`, permission paths block)
 - [ ] App discovery and registry from `APPS_ROOT`
 - [ ] Session management
 
-### Phase 3: sandbox-app-sdk
-- [ ] `crates/sandbox-app-sdk/` — `SandboxApp` trait + `run()` entry point
-- [ ] Framebuffer and control socket setup abstracted by SDK
-- [ ] Typed backend message types
-- [ ] Port file-explorer from WASM prototype to native binary using SDK
+### Phase 4: sandbox-app-sdk
+- [ ] `crates/sandbox-app-sdk/` — manifest types, capability notification helpers
+- [ ] Port file-explorer from WASM prototype to native X11 binary
 - [ ] SDK documentation and example app
 
-### Phase 4: Advanced Features
+### Phase 5: Advanced features + additional applications
 - [ ] Watermarking (sandboxed mode)
 - [ ] Session recording
 - [ ] Multiple video quality options
 - [ ] Collaborative viewing
 - [ ] Hot-reload of apps without backend restart
-
-### Phase 5: Additional Applications
-- [ ] Document viewer/editor
-- [ ] Code viewer
-- [ ] Media player
-- [ ] Spreadsheet viewer
+- [ ] Document viewer/editor, code viewer, media player, spreadsheet viewer
 
 ---
 
@@ -562,4 +545,4 @@ applications:
 
 ---
 
-**Last Updated**: 2026-02-17
+**Last Updated**: 2026-02-18

@@ -1,5 +1,4 @@
-use crate::infrastructure::driven::sandbox::native_runtime::NativeAppManager;
-use crate::infrastructure::driven::sandbox::gstreamer::feed_frames_to_appsrc;
+use crate::infrastructure::driven::sandbox::XvfbManager;
 use crate::infrastructure::driven::sandbox::GStreamerManager;
 use anyhow::Result;
 use axum::extract::{
@@ -15,7 +14,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 use webrtc::{
     api::{media_engine::MediaEngine, APIBuilder},
@@ -58,16 +57,16 @@ pub struct WebRTCAdapter {
     peers: Arc<RwLock<HashMap<String, Arc<RTCPeerConnection>>>>,
     tracks: Arc<RwLock<HashMap<String, Arc<TrackLocalStaticSample>>>>,
     cancel_tokens: Arc<RwLock<HashMap<String, CancellationToken>>>,
-    native_manager: Arc<NativeAppManager>,
+    xvfb_manager: Arc<XvfbManager>,
 }
 
 impl WebRTCAdapter {
-    pub fn new(native_manager: Arc<NativeAppManager>) -> Self {
+    pub fn new(xvfb_manager: Arc<XvfbManager>) -> Self {
         Self {
             peers: Arc::new(RwLock::new(HashMap::new())),
             tracks: Arc::new(RwLock::new(HashMap::new())),
             cancel_tokens: Arc::new(RwLock::new(HashMap::new())),
-            native_manager,
+            xvfb_manager,
         }
     }
 
@@ -114,7 +113,6 @@ impl WebRTCAdapter {
                     urls: vec![turn_server],
                     username: turn_username,
                     credential: turn_credential,
-                    // credential_type field removed (not present in new webrtc crate)
                 },
             ],
             ..Default::default()
@@ -138,66 +136,37 @@ impl WebRTCAdapter {
             .add_track(Arc::clone(&video_track) as Arc<dyn TrackLocal + Send + Sync>)
             .await?;
 
-        // Set up cancel token for this session
-        let cancel_token = CancellationToken::new();
-        let token_clone = cancel_token.clone();
-
-        // Launch WASM app and get frame channel
         let width = config.width;
         let height = config.height;
         let framerate = config.framerate;
 
-        let frame_rx = self
-            .native_manager
-            .launch_app(session_id, "file-explorer", width, height, framerate)
-            .await?;
+        // Start Xvfb, launch app, start capture
+        self.xvfb_manager.start_xvfb(session_id, width, height).await?;
+        self.xvfb_manager.launch_app(session_id, "file-explorer", width, height).await?;
+        let vp8_rx = self.xvfb_manager.start_capture(session_id, framerate, &gstreamer).await?;
 
-        // Start GStreamer appsrc pipeline
-        let (pipeline, vp8_rx) =
-            gstreamer.start_appsrc_pipeline(session_id, width, height, framerate)?;
-
-        // Spawn task to feed RGBA frames from WASM → GStreamer appsrc
-        let feed_token = cancel_token.clone();
-        let feed_session = session_id.to_string();
-        let feed_pipeline = pipeline.clone();
-        tokio::spawn(async move {
-            feed_frames_to_appsrc(feed_pipeline, frame_rx, feed_token, framerate, feed_session)
-                .await;
-        });
+        // Set up cancel token for this session
+        let cancel_token = CancellationToken::new();
+        let token_clone = cancel_token.clone();
 
         // Spawn task to read VP8 frames from GStreamer → WebRTC track
-        let track_clone = Arc::clone(&video_track);
-        let session_id_string = session_id.to_string();
-        tokio::spawn(async move {
-            let mut frame_count = 0u64;
+        let video_track_for_thread = Arc::clone(&video_track);
+        tokio::task::spawn_blocking(move || {
             while let Ok(frame_data) = vp8_rx.recv() {
                 if token_clone.is_cancelled() {
-                    info!(
-                        "[session {}] VP8 stream cancelled after {} frames",
-                        session_id_string, frame_count
-                    );
                     break;
                 }
-                if let Err(e) = track_clone
-                    .write_sample(&webrtc::media::Sample {
+                let result = tokio::runtime::Handle::current().block_on(
+                    video_track_for_thread.write_sample(&webrtc::media::Sample {
                         data: frame_data.into(),
                         duration: std::time::Duration::from_millis(1000 / framerate.max(1) as u64),
                         ..Default::default()
                     })
-                    .await
-                {
+                );
+                if let Err(e) = result {
                     warn!("Failed to send VP8 sample: {}", e);
-                } else {
-                    frame_count += 1;
-                    if frame_count % 30 == 0 {
-                        debug!("Streamed {} VP8 frames", frame_count);
-                    }
                 }
             }
-            info!(
-                "[session {}] VP8 stream ended after {} frames",
-                session_id_string, frame_count
-            );
         });
 
         // Store cancel token
@@ -348,8 +317,8 @@ impl WebRTCAdapter {
         }
         drop(tokens);
 
-        // Cleanup native session
-        let _ = self.native_manager.cleanup_session(session_id).await;
+        // Cleanup Xvfb session (stops pipeline, xdotool, app, Xvfb)
+        let _ = self.xvfb_manager.cleanup_session(session_id).await;
 
         let mut peers = self.peers.write().await;
         let mut tracks = self.tracks.write().await;
@@ -453,10 +422,11 @@ async fn handle_socket(socket: WebSocket, adapter: Arc<WebRTCAdapter>, session_i
     }
 
     info!(
-        "WebSocket handler ending, cleaning up session: {}",
+        "[CLEANUP] WebSocket handler ending, cleaning up session: {}",
         session_id
     );
-    let _ = adapter.cleanup(&session_id).await;
+    let cleanup_result = adapter.cleanup(&session_id).await;
+    info!("[CLEANUP] WebSocket handler cleanup result for session {}: {:?}", session_id, cleanup_result);
 }
 
 async fn handle_signaling_message(
@@ -490,54 +460,35 @@ async fn handle_signaling_message(
         }
         SignalingMessage::MouseMove { x, y } => {
             info!("Received MouseMove: x={}, y={}", x, y);
-            adapter
-                .native_manager
-                .handle_pointer_event(session_id, x as f32, y as f32, false)
-                .await;
+            adapter.xvfb_manager.handle_mouse_move(session_id, x, y).await;
             Ok(None)
         }
         SignalingMessage::MouseDown { button } => {
             info!("Received MouseDown: button={}", button);
-            adapter
-                .native_manager
-                .handle_mouse_button(session_id, button, true)
-                .await;
+            adapter.xvfb_manager.handle_mouse_button(session_id, button, true).await;
             Ok(None)
         }
         SignalingMessage::MouseUp { button } => {
             info!("Received MouseUp: button={}", button);
-            adapter
-                .native_manager
-                .handle_mouse_button(session_id, button, false)
-                .await;
+            adapter.xvfb_manager.handle_mouse_button(session_id, button, false).await;
             Ok(None)
         }
         SignalingMessage::MouseScroll { delta_y } => {
             info!("Received MouseScroll: delta_y={}", delta_y);
-            // TODO: Forward scroll events to WASM app
             Ok(None)
         }
-        SignalingMessage::KeyDown { key, code } => {
+        SignalingMessage::KeyDown { key, .. } => {
             info!("Received KeyDown: key={}", key);
-            adapter
-                .native_manager
-                .handle_keyboard(session_id, key, code, true)
-                .await;
+            adapter.xvfb_manager.handle_keyboard(session_id, &key, true).await;
             Ok(None)
         }
-        SignalingMessage::KeyUp { key, code } => {
+        SignalingMessage::KeyUp { key, .. } => {
             info!("Received KeyUp: key={}", key);
-            adapter
-                .native_manager
-                .handle_keyboard(session_id, key, code, false)
-                .await;
+            adapter.xvfb_manager.handle_keyboard(session_id, &key, false).await;
             Ok(None)
         }
         SignalingMessage::Resize { width, height } => {
             info!("Received Resize: width={}, height={}", width, height);
-            // If you need to update the running session, call a method here, e.g.:
-            // adapter.wasm_manager.set_resolution(session_id, width, height).await;
-            // If you need to update framerate, add it to the message and handle accordingly.
             Ok(None)
         }
         _ => Ok(None),

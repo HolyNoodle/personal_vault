@@ -49,7 +49,7 @@ pub async fn launch_application(
 
     let session_id = uuid::Uuid::new_v4().to_string();
 
-    // The WASM app is launched when WebRTC connects (on request-offer).
+    // The app is launched when WebRTC connects (on request-offer).
     // This endpoint just returns the session info for the client to connect.
 
     Json(LaunchApplicationResponse {

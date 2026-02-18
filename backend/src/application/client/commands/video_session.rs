@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use crate::domain::aggregates::{VideoSession, VideoConfig};
-use crate::infrastructure::driven::NativeAppManager;
+use crate::infrastructure::driven::XvfbManager;
 use crate::infrastructure::driving::WebRTCAdapter;
 
 /// Command to create a new video session
@@ -29,7 +29,7 @@ pub struct CreateSessionResult {
 pub struct CreateSessionHandler;
 
 impl CreateSessionHandler {
-    pub fn new(_: Arc<NativeAppManager>) -> Self {
+    pub fn new(_: Arc<XvfbManager>) -> Self {
         Self
     }
 
@@ -45,10 +45,8 @@ impl CreateSessionHandler {
         let session = VideoSession::new(command.user_id.clone(), command.config.clone());
         let session_id = session.id.to_string();
 
-        // The WASM app and GStreamer pipeline are launched when the WebRTC
+        // The app and GStreamer pipeline are launched when the WebRTC
         // connection is established (on request-offer), not here.
-        // This handler just creates the session record.
-
         tracing::info!("[session {}] Session created, ready for WebRTC connection", session_id);
 
         Ok(CreateSessionResult {
@@ -65,21 +63,18 @@ pub struct TerminateSessionCommand {
 }
 
 pub struct TerminateSessionHandler {
-    native_manager: Arc<NativeAppManager>,
+    xvfb_manager: Arc<XvfbManager>,
 }
 
 impl TerminateSessionHandler {
-    pub fn new(
-        native_manager: Arc<NativeAppManager>,
-    ) -> Self {
-        Self {
-            native_manager,
-        }
+    pub fn new(xvfb_manager: Arc<XvfbManager>) -> Self {
+        Self { xvfb_manager }
     }
 
     pub async fn handle(&self, command: TerminateSessionCommand) -> Result<()> {
-        tracing::info!("Terminating session: {}", command.session_id);
-        self.native_manager.cleanup_session(&command.session_id).await?;
-        Ok(())
+        tracing::info!("[CLEANUP] TerminateSessionHandler::handle called for session: {}", command.session_id);
+        let result = self.xvfb_manager.cleanup_session(&command.session_id).await;
+        tracing::info!("[CLEANUP] TerminateSessionHandler::handle finished for session: {} result: {:?}", command.session_id, result);
+        result
     }
 }

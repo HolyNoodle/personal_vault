@@ -1,70 +1,66 @@
 use anyhow::{Context, Result};
-use std::process::Stdio;
-use tokio::process::{Child, Command};
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use gstreamer as gst;
+use gstreamer::prelude::*;
+use std::os::unix::process::CommandExt;
 use std::collections::HashMap;
-use tracing::{debug, error, info, warn};
-// ...existing code...
-// Removed import for deleted SandboxPort trait
+use std::process::Stdio;
+use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::Arc;
+use tokio::process::{Child, Command};
+use tokio::sync::RwLock;
+use tracing::{error, info, warn};
+use x11rb::connection::Connection;
+use x11rb::protocol::xproto::ConnectionExt as XProtoExt;
+use x11rb::protocol::xtest::ConnectionExt as XTestExt;
+use x11rb::rust_connection::RustConnection;
 
-/// Manages Xvfb (X Virtual Framebuffer) instances
+use super::gstreamer::GStreamerManager;
+
 pub struct XvfbManager {
     displays: Arc<RwLock<HashMap<String, XvfbSession>>>,
+    apps_root: String,
+    next_display: Arc<AtomicU16>,
 }
 
 struct XvfbSession {
     display_number: u16,
+    display_str: String,
     process: Option<Child>,
-    dbus_address: Option<String>,
     app_process: Option<Child>,
-    wm_process: Option<Child>,
+    x11_conn: Option<Arc<RustConnection>>,
+    keysym_map: Arc<HashMap<u32, (u8, bool)>>,
+    shift_keycode: u8,
+    gst_pipeline: Option<gst::Pipeline>,
 }
 
 impl XvfbManager {
-        /// Get the display string for a session, e.g. ":100"
-        pub async fn get_display_str(&self, session_id: &str) -> Option<String> {
-            let displays = self.displays.read().await;
-            displays.get(session_id).map(|s| format!(":{}", s.display_number))
-        }
-    pub fn new() -> Self {
+    pub fn new(apps_root: String) -> Self {
         Self {
             displays: Arc::new(RwLock::new(HashMap::new())),
+            apps_root,
+            next_display: Arc::new(AtomicU16::new(0)),
         }
     }
 
-    pub async fn start_xvfb(&self, session_id: &str, width: u16, height: u16) -> Result<(u16, String, String)> {
-        // Generate a unique display number for session isolation
-        let display_number = 100 + (rand::random::<u16>() % 100);
+    fn alloc_display(&self) -> u16 {
+        let raw = self.next_display.fetch_add(1, Ordering::SeqCst);
+        100 + (raw % 100)
+    }
+
+    pub async fn get_display_str(&self, session_id: &str) -> Option<String> {
+        let displays = self.displays.read().await;
+        displays.get(session_id).map(|s| s.display_str.clone())
+    }
+
+    pub async fn start_xvfb(&self, session_id: &str, width: u16, height: u16) -> Result<(u16, String)> {
+        let display_number = self.alloc_display();
         let display_str = format!(":{}", display_number);
         let resolution = format!("{}x{}x24", width, height);
 
-        info!(
-            "Starting Xvfb on display {} for session {} ({}x{})",
-            display_str, session_id, width, height
-        );
 
-        // Start D-Bus session for this display
-        let dbus_output = Command::new("dbus-launch")
-            .stdout(Stdio::piped())
-            .spawn()
-            .context("Failed to start dbus-launch")?
-            .wait_with_output()
-            .await
-            .context("Failed to wait for dbus-launch")?;
-
-        let dbus_info = String::from_utf8_lossy(&dbus_output.stdout);
-        let dbus_address = dbus_info
-            .lines()
-            .find(|line| line.starts_with("DBUS_SESSION_BUS_ADDRESS="))
-            .and_then(|line| line.split('=').nth(1))
-            .unwrap_or("unix:path=/run/user/0/bus")
-            .to_string();
-
-        info!("D-Bus session started: {}", dbus_address);
-
-        // Start session-specific Xvfb
-        let child = Command::new("Xvfb")
+        info!("[DEBUG] About to spawn Xvfb process for session {} on {} ({}x{})", session_id, display_str, width, height);
+        let xvfb_child = unsafe {
+            Command::new("Xvfb")
             .arg(&display_str)
             .arg("-screen")
             .arg("0")
@@ -78,163 +74,373 @@ impl XvfbManager {
             .arg("-noreset")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .spawn()
-            .context("Failed to start Xvfb. Make sure Xvfb is installed.")?;
-
-        info!("Session-specific Xvfb started on display {} for session {}", display_str, session_id);
+                .pre_exec(|| {
+                    libc::setsid();
+                    Ok(())
+                })
+                .spawn()
+                .context("Failed to start Xvfb")?
+        };
+        info!("[DEBUG] Xvfb process spawned for session {}", session_id);
 
         // Give Xvfb time to initialize
+        info!("[DEBUG] Sleeping 500ms to let Xvfb initialize for session {}", session_id);
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        info!("[DEBUG] Done sleeping, about to connect to Xvfb with x11rb for session {}", session_id);
+
+        // Connect to Xvfb via x11rb and build keysym→keycode map
+        let display_str_clone = display_str.clone();
+        let session_id_owned = session_id.to_string();
+        let (conn, keysym_map, shift_keycode) =
+            tokio::task::spawn_blocking(move || -> Result<(Arc<RustConnection>, Arc<HashMap<u32, (u8, bool)>>, u8)> {
+                info!("[DEBUG] In spawn_blocking: connecting to Xvfb display {} for session {}", display_str_clone, session_id_owned);
+                let (conn, _screen_num) = RustConnection::connect(Some(&display_str_clone))
+                    .context("Failed to connect to Xvfb display")?;
+                info!("[DEBUG] Connected to Xvfb display {} for session {}", display_str_clone, session_id_owned);
+
+                let setup = conn.setup();
+                let min_kc = setup.min_keycode;
+                let max_kc = setup.max_keycode;
+
+                let map = conn
+                    .get_keyboard_mapping(min_kc, max_kc - min_kc + 1)?
+                    .reply()
+                    .context("Failed to get keyboard mapping")?;
+
+                let syms_per = map.keysyms_per_keycode as usize;
+                let mut keysym_map: HashMap<u32, (u8, bool)> = HashMap::new();
+                for (i, chunk) in map.keysyms.chunks(syms_per).enumerate() {
+                    let kc = min_kc + i as u8;
+                    if let Some(&sym) = chunk.get(0) {
+                        if sym != 0 {
+                            keysym_map.entry(sym).or_insert((kc, false));
+                        }
+                    }
+                    if let Some(&sym) = chunk.get(1) {
+                        if sym != 0 {
+                            keysym_map.entry(sym).or_insert((kc, true));
+                        }
+                    }
+                }
+
+                // Left Shift keysym = 0xFFE1
+                let shift_keycode = keysym_map.get(&0xFFE1).map(|&(kc, _)| kc).unwrap_or(50);
+
+                info!("[DEBUG] Built keysym map and shift_keycode for session {}", session_id_owned);
+                Ok((Arc::new(conn), Arc::new(keysym_map), shift_keycode))
+            })
+            .await
+            .context("spawn_blocking panicked")??;
+
+        info!(
+            "x11rb connected to {} for session {} (shift_keycode={})",
+            display_str, session_id, shift_keycode
+        );
 
         let session = XvfbSession {
             display_number,
-            process: Some(child),
-            dbus_address: Some(dbus_address.clone()),
+            display_str: display_str.clone(),
+            process: Some(xvfb_child),
             app_process: None,
-            wm_process: None,
+            x11_conn: Some(conn),
+            keysym_map,
+            shift_keycode,
+            gst_pipeline: None,
         };
 
         let mut displays = self.displays.write().await;
         displays.insert(session_id.to_string(), session);
 
-        Ok((display_number, display_str, dbus_address))
+        Ok((display_number, display_str))
     }
 
-    async fn cleanup_session(&self, session_id: &str) -> Result<()> {
-        info!("cleanup_session called for session {}", session_id);
-        let mut displays = self.displays.write().await;
-        info!("displays before removal: keys={:?}", displays.keys().collect::<Vec<_>>());
-        if let Some(mut session) = displays.remove(session_id) {
-            info!("Session found for cleanup: display_number={}, app_process_present={}, wm_process_present={}, xvfb_process_present={}",
-                session.display_number,
-                session.app_process.is_some(),
-                session.wm_process.is_some(),
-                session.process.is_some());
-            debug!("app_process state for session {}: {:?}", session_id, session.app_process);
-            info!("Stopping Xvfb for session {}", session_id);
+    pub async fn launch_app(
+        &self,
+        session_id: &str,
+        app_name: &str,
+        width: u16,
+        height: u16,
+    ) -> Result<()> {
+        let binary_name = app_name.replace('-', "_");
+        let binary_path = format!("{}/{}/{}", self.apps_root, binary_name, binary_name);
 
-            // Helper to kill a process and its children
-            async fn kill_process_and_children(child: &mut Child, label: &str) {
-                if let Some(id) = child.id() {
-                    // Send SIGTERM to the process group
-                    #[cfg(unix)]
-                    unsafe {
-                        use libc::{killpg, SIGTERM};
-                        let pgid = libc::getpgid(id as libc::pid_t);
-                        if pgid > 0 {
-                            let res = killpg(pgid, SIGTERM);
-                            if res == 0 {
-                                info!("Sent SIGTERM to {} process group {}", label, pgid);
-                            } else {
-                                error!("Failed to send SIGTERM to {} process group {}", label, pgid);
+        info!("[DEBUG] launch_app: about to read display_str for session {}", session_id);
+        let display_str = {
+            let displays = self.displays.read().await;
+            displays
+                .get(session_id)
+                .map(|s| s.display_str.clone())
+                .ok_or_else(|| anyhow::anyhow!("Session not found: {}", session_id))?
+        };
+        info!("[DEBUG] launch_app: got display_str, about to spawn app for session {}", session_id);
+
+        let ipc_socket_path = std::env::var("IPC_SOCKET_PATH")
+            .unwrap_or_else(|_| "/tmp/sandbox-ipc.sock".to_string());
+
+        let mut child = unsafe {
+            Command::new(&binary_path)
+                .env("DISPLAY", &display_str)
+                .env("IPC_SOCKET_PATH", &ipc_socket_path)
+                .env("SANDBOX_WIDTH", width.to_string())
+                .env("SANDBOX_HEIGHT", height.to_string())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .pre_exec(|| {
+                    libc::setsid();
+                    Ok(())
+                })
+                .spawn()
+                .with_context(|| format!("Failed to spawn {}", binary_path))?
+        };
+        info!("[DEBUG] App process spawned for session {}: pid={:?}", session_id, child.id());
+
+        if let Some(stdout) = child.stdout.take() {
+            use tokio::io::AsyncBufReadExt;
+            let reader = tokio::io::BufReader::new(stdout);
+            let app = app_name.to_string();
+            tokio::spawn(async move {
+                let mut lines = reader.lines();
+                let mut last_log = std::time::Instant::now();
+                loop {
+                    let line_fut = lines.next_line();
+                    let timeout = tokio::time::sleep(tokio::time::Duration::from_secs(5));
+                    tokio::select! {
+                        line = line_fut => {
+                            match line {
+                                Ok(Some(line)) => {
+                                    info!("App stdout [{}]: {}", app, line);
+                                    last_log = std::time::Instant::now();
+                                },
+                                Ok(None) => break,
+                                Err(e) => { error!("App stdout [{}] read error: {}", app, e); break; }
                             }
+                        }
+                        _ = timeout => {
+                            error!("App stdout [{}]: No output for 5s, possible block", app);
                         }
                     }
                 }
-                let _ = child.kill().await;
-                let _ = child.wait().await;
-            }
-
-            // Kill application process first
-            if let Some(mut child) = session.app_process.take() {
-                info!("Cleaning up file-explorer process for session {} (pid={:?})", session_id, child.id());
-                kill_process_and_children(&mut child, "app").await;
-                info!("file-explorer process cleanup complete for session {}", session_id);
-            } else {
-                info!("No app_process found for session {} during cleanup", session_id);
-            }
-
-            // Kill window manager
-            if let Some(mut child) = session.wm_process.take() {
-                info!("Cleaning up window manager for session {} (pid={:?})", session_id, child.id());
-                kill_process_and_children(&mut child, "wm").await;
-                info!("window manager cleanup complete for session {}", session_id);
-            } else {
-                info!("No wm_process found for session {} during cleanup", session_id);
-            }
-
-            // Then kill Xvfb
-            if let Some(mut child) = session.process.take() {
-                info!("Cleaning up Xvfb for session {} (pid={:?})", session_id, child.id());
-                kill_process_and_children(&mut child, "xvfb").await;
-                info!("Xvfb cleanup complete for session {}", session_id);
-            } else {
-                info!("No Xvfb process found for session {} during cleanup", session_id);
-            }
-        } else {
-            info!("No session found for cleanup for session_id={}", session_id);
+            });
         }
-        info!("cleanup_session finished for session {}", session_id);
+
+        if let Some(stderr) = child.stderr.take() {
+            use tokio::io::AsyncBufReadExt;
+            let reader = tokio::io::BufReader::new(stderr);
+            let app = app_name.to_string();
+            tokio::spawn(async move {
+                let mut lines = reader.lines();
+                let mut last_log = std::time::Instant::now();
+                loop {
+                    let line_fut = lines.next_line();
+                    let timeout = tokio::time::sleep(tokio::time::Duration::from_secs(5));
+                    tokio::select! {
+                        line = line_fut => {
+                            match line {
+                                Ok(Some(line)) => {
+                                    error!("App stderr [{}]: {}", app, line);
+                                    last_log = std::time::Instant::now();
+                                },
+                                Ok(None) => break,
+                                Err(e) => { error!("App stderr [{}] read error: {}", app, e); break; }
+                            }
+                        }
+                        _ = timeout => {
+                            error!("App stderr [{}]: No output for 5s, possible block", app);
+                        }
+                    }
+                }
+            });
+        }
+
+        info!("[DEBUG] launch_app: about to write app_process for session {}", session_id);
+        let mut displays = self.displays.write().await;
+        if let Some(session) = displays.get_mut(session_id) {
+            session.app_process = Some(child);
+        } else {
+            warn!("Session not found when storing app_process for {}", session_id);
+        }
+        info!("[DEBUG] launch_app: completed for session {}", session_id);
         Ok(())
     }
 
-    pub async fn launch_app(&self, session_id: &str, display_str: &str, command: &str, width: u16, height: u16) -> Result<()> {
-        debug!("Launching {} for session {} ({}x{})", command, session_id, width, height);
+    pub async fn start_capture(
+        &self,
+        session_id: &str,
+        framerate: u8,
+        gstreamer: &GStreamerManager,
+    ) -> Result<std::sync::mpsc::Receiver<Vec<u8>>> {
+        let display_str = {
+            let displays = self.displays.read().await;
+            displays
+                .get(session_id)
+                .map(|s| s.display_str.clone())
+                .ok_or_else(|| anyhow::anyhow!("Session not found: {}", session_id))?
+        };
 
-        // Special case: file-explorer as WASM app (no Xvfb, no openbox)
-        if command == "file-explorer" {
-            // Launch with wasmtime and the WASM file
-            let wasm_path = "apps/file-explorer/target/wasm32-unknown-unknown/debug/file_explorer.wasm";
-            let mut cmd = Command::new("wasmtime");
-            cmd.arg(wasm_path);
-            // Pass IPC socket path if needed
-            if let Ok(ipc_path) = std::env::var("IPC_SOCKET_PATH") {
-                cmd.env("IPC_SOCKET_PATH", ipc_path);
-            }
-            // Add any other required env vars or args here
-            let child = cmd
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn();
-            match child {
-                Ok(mut child) => {
-                    info!("Spawned WASM app process for session {}: pid={:?}", session_id, child.id());
-                    // Log child process output for debugging
-                    if let Some(stdout) = child.stdout.take() {
-                        use tokio::io::AsyncBufReadExt;
-                        let reader = tokio::io::BufReader::new(stdout);
-                        let command_owned = command.to_string();
-                        tokio::spawn(async move {
-                            let mut lines = reader.lines();
-                            while let Ok(Some(line)) = lines.next_line().await {
-                                tracing::info!("App stdout [{}]: {}", command_owned, line);
-                            }
-                        });
-                    }
-                    if let Some(stderr) = child.stderr.take() {
-                        use tokio::io::AsyncBufReadExt;
-                        let reader = tokio::io::BufReader::new(stderr);
-                        let command_owned = command.to_string();
-                        tokio::spawn(async move {
-                            let mut lines = reader.lines();
-                            while let Ok(Some(line)) = lines.next_line().await {
-                                tracing::error!("App stderr [{}]: {}", command_owned, line);
-                            }
-                        });
-                    }
-                    // Store the child process to keep it alive
-                    let mut displays = self.displays.write().await;
-                    if let Some(session) = displays.get_mut(session_id) {
-                        info!("Storing app_process for session {}: pid={:?}", session_id, child.id());
-                        session.app_process = Some(child);
-                    } else {
-                        warn!("Session not found when storing app_process for session {}", session_id);
-                    }
-                    drop(displays);
-                }
-                Err(e) => {
-                    error!("Failed to launch WASM app '{}' for session {}: {}", command, session_id, e);
-                    tracing::error!("App launch error [{}]: {}", command, e);
-                    return Err(anyhow::anyhow!("Failed to launch {}: {}", command, e));
-                }
-            }
-            return Ok(());
+        let (pipeline, rx) =
+            gstreamer.start_ximagesrc_pipeline(session_id, &display_str, framerate)?;
+
+        let mut displays = self.displays.write().await;
+        if let Some(session) = displays.get_mut(session_id) {
+            session.gst_pipeline = Some(pipeline);
         }
 
-        // Default: legacy/native apps (Xvfb, openbox, etc.)
-        // ...existing code for other apps...
+        Ok(rx)
+    }
+
+    pub async fn handle_mouse_move(&self, session_id: &str, x: i32, y: i32) {
+        let conn = {
+            let displays = self.displays.read().await;
+            displays.get(session_id).and_then(|s| s.x11_conn.clone())
+        };
+        if let Some(conn) = conn {
+            // MOTION_NOTIFY event type = 6
+            if let Err(e) = (&*conn)
+                .xtest_fake_input(6, 0, 0, 0u32, x as i16, y as i16, 0)
+                .and_then(|_| (&*conn).flush())
+            {
+                warn!("handle_mouse_move x11rb error: {}", e);
+            }
+        }
+    }
+
+    pub async fn handle_mouse_button(&self, session_id: &str, button: u8, pressed: bool) {
+        let conn = {
+            let displays = self.displays.read().await;
+            displays.get(session_id).and_then(|s| s.x11_conn.clone())
+        };
+        if let Some(conn) = conn {
+            // BUTTON_PRESS_EVENT = 4, BUTTON_RELEASE_EVENT = 5
+            let type_ = if pressed { 4u8 } else { 5u8 };
+            if let Err(e) = (&*conn)
+                .xtest_fake_input(type_, button, 0, 0u32, 0, 0, 0)
+                .and_then(|_| (&*conn).flush())
+            {
+                warn!("handle_mouse_button x11rb error: {}", e);
+            }
+        }
+    }
+
+    pub async fn handle_keyboard(&self, session_id: &str, key: &str, pressed: bool) {
+        let (conn, keysym_map, shift_keycode) = {
+            let displays = self.displays.read().await;
+            match displays.get(session_id) {
+                Some(s) => match &s.x11_conn {
+                    Some(c) => (c.clone(), s.keysym_map.clone(), s.shift_keycode),
+                    None => return,
+                },
+                None => return,
+            }
+        };
+
+        let Some(keysym) = browser_key_to_keysym(key) else { return };
+        let Some(&(keycode, needs_shift)) = keysym_map.get(&keysym) else { return };
+
+        // KEY_PRESS_EVENT = 2, KEY_RELEASE_EVENT = 3
+        let result: Result<(), x11rb::errors::ConnectionError> = (|| {
+            if pressed {
+                if needs_shift {
+                    (&*conn).xtest_fake_input(2, shift_keycode, 0, 0u32, 0, 0, 0)?;
+                }
+                (&*conn).xtest_fake_input(2, keycode, 0, 0u32, 0, 0, 0)?;
+            } else {
+                (&*conn).xtest_fake_input(3, keycode, 0, 0u32, 0, 0, 0)?;
+                if needs_shift {
+                    (&*conn).xtest_fake_input(3, shift_keycode, 0, 0u32, 0, 0, 0)?;
+                }
+            }
+            (&*conn).flush()?;
+            Ok(())
+        })();
+
+        if let Err(e) = result {
+            warn!("handle_keyboard x11rb error: {}", e);
+        }
+    }
+
+    pub async fn cleanup_session(&self, session_id: &str) -> Result<()> {
+        info!("[CLEANUP] cleanup_session called for session {}", session_id);
+        let mut displays = self.displays.write().await;
+        if let Some(mut session) = displays.remove(session_id) {
+            // Stop GStreamer pipeline
+            if let Some(pipeline) = session.gst_pipeline.take() {
+                info!("[CLEANUP] Stopping GStreamer pipeline for session {}", session_id);
+                let _ = pipeline.set_state(gst::State::Null);
+            }
+
+            // Drop x11 connection
+            info!("[CLEANUP] Dropping x11 connection for session {}", session_id);
+            drop(session.x11_conn.take());
+
+            // Kill app process
+            if let Some(mut child) = session.app_process.take() {
+                info!("[CLEANUP] Killing app process for session {}", session_id);
+                kill_child(&mut child, "app").await;
+            }
+
+            // Kill Xvfb
+            if let Some(mut child) = session.process.take() {
+                info!("[CLEANUP] Killing Xvfb process for session {}", session_id);
+                kill_child(&mut child, "xvfb").await;
+            }
+        } else {
+            info!("[CLEANUP] No session found for cleanup: {}", session_id);
+        }
+        info!("[CLEANUP] cleanup_session finished for session {}", session_id);
         Ok(())
     }
 }
 
-// Removed trait implementation for deleted SandboxPort
+/// Map browser key names to X11 keysyms.
+fn browser_key_to_keysym(key: &str) -> Option<u32> {
+    match key {
+        "Enter" => return Some(0xFF0D),
+        "Backspace" => return Some(0xFF08),
+        "Tab" => return Some(0xFF09),
+        "Escape" => return Some(0xFF1B),
+        "Delete" => return Some(0xFFFF),
+        "ArrowLeft" => return Some(0xFF51),
+        "ArrowUp" => return Some(0xFF52),
+        "ArrowRight" => return Some(0xFF53),
+        "ArrowDown" => return Some(0xFF54),
+        " " => return Some(0x0020),
+        _ => {}
+    }
+    // Single printable ASCII char: keysym == Unicode codepoint
+    let c = key.chars().next()?;
+    if c.is_ascii() && !c.is_control() {
+        Some(c as u32)
+    } else {
+        None
+    }
+}
+
+async fn kill_child(child: &mut Child, label: &str) {
+    #[cfg(unix)]
+    if let Some(id) = child.id() {
+        unsafe {
+            use libc::{killpg, SIGTERM};
+            let pgid = libc::getpgid(id as libc::pid_t);
+            if pgid > 0 {
+                let res = killpg(pgid, SIGTERM);
+                if res == 0 {
+                    info!("[CLEANUP] Sent SIGTERM to process group {} for {} (pid={})", pgid, label, id);
+                } else {
+                    let err = std::io::Error::last_os_error();
+                    error!("[CLEANUP] Failed to send SIGTERM to process group {} for {} (pid={}): {}", pgid, label, id, err);
+                }
+            } else {
+                error!("[CLEANUP] Failed to get pgid for {} (pid={})", label, id);
+            }
+        }
+    }
+    match child.kill().await {
+        Ok(_) => info!("[CLEANUP] kill() succeeded for {}", label),
+        Err(e) => error!("[CLEANUP] kill() failed for {}: {}", label, e),
+    }
+    match child.wait().await {
+        Ok(status) => info!("[CLEANUP] wait() for {} returned: {:?}", label, status),
+        Err(e) => error!("[CLEANUP] wait() failed for {}: {}", label, e),
+    }
+    info!("[CLEANUP] {} process cleaned up", label);
+}

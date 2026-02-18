@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install -y \
     git \
     nodejs \
     npm \
+    xvfb \
     && rm -rf /var/lib/apt/lists/*
 
 # Install cargo-watch for hot-reloading

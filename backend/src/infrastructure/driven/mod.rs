@@ -4,5 +4,5 @@ pub mod input;
 pub mod ipc;
 
 pub use persistence::*;
-pub use sandbox::NativeAppManager;
+pub use sandbox::XvfbManager;
 pub use ipc::IpcSocketServer;

@@ -8,12 +8,14 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::cors::{CorsLayer, Any};
 
+use tracing::info;
+
 mod domain;
 mod application;
 mod infrastructure;
 
 use infrastructure::driving::{WebRTCAdapter};
-use infrastructure::driven::{NativeAppManager, IpcSocketServer};
+use infrastructure::driven::{XvfbManager, IpcSocketServer};
 use infrastructure::driven::persistence::{PostgresCredentialRepository, RedisChallengeRepository};
 use infrastructure::driving::http::video_api::{ApiState, create_video_api_router};
 use axum::routing::post;
@@ -23,6 +25,21 @@ use application::ports::{CredentialRepository, ChallengeRepository};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing::info!("[DEBUG] Backend main() started");
+    // Set panic hook
+    std::panic::set_hook(Box::new(|panic_info| {
+        tracing::error!("[PANIC] {}", panic_info);
+    }));
+    // Log on shutdown (SIGINT/SIGTERM)
+    if let Err(e) = ctrlc::set_handler(move || {
+        tracing::warn!("[SHUTDOWN] Received termination signal (SIGINT/SIGTERM) - ctrlc handler");
+        // Print backtrace if possible
+        let bt = std::backtrace::Backtrace::capture();
+        tracing::warn!("[SHUTDOWN] Backtrace: {:?}", bt);
+        std::process::exit(0);
+    }) {
+        tracing::error!("[SHUTDOWN] Failed to set Ctrl-C handler: {}", e);
+    }
     // Install default crypto provider for jsonwebtoken crate
 
     // Minimal logging: info and above
@@ -87,19 +104,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize infrastructure adapters
     let apps_root = std::env::var("APPS_ROOT").unwrap_or_else(|_| "/app/.app".to_string());
-    let native_manager = Arc::new(NativeAppManager::new(apps_root));
+    let xvfb_manager = Arc::new(XvfbManager::new(apps_root));
 
     // Initialize command handlers
     let create_session_handler = Arc::new(CreateSessionHandler::new(
-        native_manager.clone(),
+        xvfb_manager.clone(),
     ));
 
     let terminate_session_handler = Arc::new(TerminateSessionHandler::new(
-        native_manager.clone(),
+        xvfb_manager.clone(),
     ));
 
-    // Initialize WebRTC adapter with NativeAppManager
-    let webrtc_adapter = Arc::new(WebRTCAdapter::new(native_manager.clone()));
+    // Initialize WebRTC adapter with XvfbManager
+    let webrtc_adapter = Arc::new(WebRTCAdapter::new(xvfb_manager.clone()));
 
     // Create API state
     let api_state = Arc::new(ApiState {
@@ -171,7 +188,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    info!("[DEBUG] TcpListener bound on {}", addr);
+    info!("[DEBUG] About to call axum::serve");
+    tracing::warn!("[AXUM] >>> axum::serve about to start");
+    let serve_result = axum::serve(listener, app).await;
+    tracing::warn!("[AXUM] <<< axum::serve returned: {:?}", serve_result);
+    if let Err(ref e) = serve_result {
+        tracing::error!("[SHUTDOWN] axum::serve returned error: {:?}", e);
+    } else {
+        tracing::warn!("[SHUTDOWN] axum::serve returned Ok, server shutting down");
+    }
+    tracing::warn!("[SHUTDOWN] main() is returning, backend will exit");
+    serve_result?;
 
     Ok(())
 }

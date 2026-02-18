@@ -11,6 +11,7 @@ keywords = ["webrtc", "sandbox", "security", "streaming"]
 categories = ["web-programming", "multimedia", "network-programming"]
 
 [dependencies]
+ctrlc = "3"
 # Shared protocol
 shared = { path = "../shared" }
 
@@ -53,8 +54,8 @@ jsonwebtoken = { version = "10.3", features = ["rust_crypto"] }
 # Async trait macro
 async-trait = "0.1"
 
-# Cryptography
-rand = "0.10"
+# X11 input injection via XTEST
+x11rb = { version = "0.13", features = ["allow-unsafe-code", "xtest"] }
 
 chrono = { version = "0.4", features = ["serde"] }
 

@@ -1,3 +1,4 @@
+use eframe::egui;
 use std::fs;
 use std::path::PathBuf;
 
@@ -60,8 +61,8 @@ fn load_directory(path: &PathBuf) -> (Vec<FileItem>, Option<String>) {
     }
 }
 
-impl sandbox_app_sdk::SandboxApp for FileExplorerApp {
-    fn show(&mut self, ctx: &egui::Context) {
+impl eframe::App for FileExplorerApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("File Explorer");
             ui.separator();
