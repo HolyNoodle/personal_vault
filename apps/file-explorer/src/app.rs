@@ -63,6 +63,8 @@ fn load_directory(path: &PathBuf) -> (Vec<FileItem>, Option<String>) {
 
 impl eframe::App for FileExplorerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Hide the mouse cursor
+        ctx.set_cursor_icon(egui::CursorIcon::None);
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("File Explorer");
             ui.separator();
