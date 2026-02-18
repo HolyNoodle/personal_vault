@@ -38,7 +38,7 @@ user.has_role(UserRole::SuperAdmin)   // true only for [SuperAdmin, Owner]
 - `complete_webauthn_registration` assigns `[SuperAdmin, Owner]` not just `[SuperAdmin]`
 - JWT claims carry `roles: Vec<String>` not `role: String`
 
-**DB reset strategy:** Rather than writing ALTER TABLE migrations on top of the PoC schema, delete all existing migrations, rewrite a single clean initial migration with the correct schema, and reset the database (`DROP SCHEMA public CASCADE; CREATE SCHEMA public;` or equivalent). No data worth preserving exists.
+**DB reset strategy:** The current schema already supports multi-role as a JSON array in a TEXT column (`roles TEXT NOT NULL DEFAULT '[]'`). No database reset or migration rewrite is required for Phase 1. You can proceed with further development without resetting the database.
 
 ---
 
@@ -110,16 +110,15 @@ Fix existing auth plumbing and migrate the single-role model to multi-role.
 ### 1.1 Multi-role domain + DB reset
 **File:** `backend/src/domain/entities/user.rs`
 **File:** `backend/src/domain/value_objects/user_role.rs`
-**Action:** delete all existing migrations; rewrite a single clean initial migration
+**Action:**
 
-- [ ] Reset DB (`DROP SCHEMA public CASCADE; CREATE SCHEMA public;`) and delete all files under `backend/migrations/`
-- [ ] Write new `001_initial_schema.sql` with `roles user_role[] NOT NULL` from the start (no ALTER TABLE needed)
-- [ ] Change `User.role: UserRole` to `User.roles: Vec<UserRole>`
-- [ ] Add `User::has_role(&self, role: UserRole) -> bool`
-- [ ] Update `UserRepository` impl to read/write `roles` array
-- [ ] Update `complete_webauthn_registration` to write `roles = [SuperAdmin, Owner]`
-- [ ] Update JWT claims: `roles: Vec<String>` instead of `role: String`
-- [ ] Update `AuthenticatedUser` extension struct: `roles: Vec<UserRole>`
+- [x] The DB schema already uses a `roles` field as a JSON array in a TEXT column; no DB reset or migration rewrite is needed.
+- [x] `User.role: UserRole` has been changed to `User.roles: Vec<UserRole>`
+- [x] `User::has_role(&self, role: UserRole) -> bool` exists
+- [x] `UserRepository` reads/writes the `roles` array as JSON
+- [x] `complete_webauthn_registration` writes `roles = [SuperAdmin, Owner]`
+- [x] JWT claims use `roles: Vec<String>`
+- [x] `AuthenticatedUser` extension struct uses `roles: Vec<UserRole>`
 
 ### 1.2 Login credential verification
 **File:** `backend/src/application/super_admin/commands/complete_webauthn_login.rs`
