@@ -89,3 +89,4 @@ temp/
 .gnupg
 .ssh
 .app
+.gitconfig
