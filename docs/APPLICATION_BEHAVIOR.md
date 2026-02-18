@@ -553,9 +553,9 @@ Client Browser ←→ WebRTC ←→ Rust Server ←→ Sandbox (isolated X11)
                                          (evince, libreoffice, etc.)
                                                ↓
                                          Video Capture
-                                          (FFmpeg)
+                                    (GStreamer: ximagesrc + VP8)
                                                ↓
-                                         H.264 Stream
+                                         VP8 Stream
                                                ↓
                                          WebRTC Video Track
                                                ↓

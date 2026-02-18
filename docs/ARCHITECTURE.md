@@ -35,7 +35,7 @@ The system follows **Hexagonal Architecture** (Ports and Adapters) with **Domain
 ┌────────────────────────────────────────────────────────────────────┐
 │                        EXTERNAL WORLD                              │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐            │
-│  │   Browser    │  │  PostgreSQL  │  │  FFmpeg      │            │
+│  │   Browser    │  │  PostgreSQL  │  │  GStreamer   │            │
 │  │   (WebRTC)   │  │  (Database)  │  │  (Video)     │            │
 │  └───────┬──────┘  └──────┬───────┘  └──────┬───────┘            │
 └──────────┼─────────────────┼──────────────────┼────────────────────┘
@@ -46,7 +46,7 @@ The system follows **Hexagonal Architecture** (Ports and Adapters) with **Domain
 ┌──────────▼─────────────────▼──────────────────▼────────────────────┐
 │                       ADAPTERS LAYER                               │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐            │
-│  │ HTTP/WS      │  │ PostgreSQL   │  │ FFmpeg       │            │
+│  │ HTTP/WS      │  │ PostgreSQL   │  │ GStreamer    │            │
 │  │ Adapter      │  │ Adapter      │  │ Adapter      │            │
 │  └───────┬──────┘  └──────┬───────┘  └──────┬───────┘            │
 └──────────┼─────────────────┼──────────────────┼────────────────────┘
@@ -162,7 +162,7 @@ The system follows **Hexagonal Architecture** (Ports and Adapters) with **Domain
 │  │  Client Session 1                               │                        │
 │  │  ┌────────────┐  ┌─────────────────────────┐  │                        │
 │  │  │ Xvfb :100  │  │ File Explorer (Rust)    │  │                        │
-│  │  │ + FFmpeg   │  │ - Read-only files       │  │                        │
+│  │  │ + GStreamer │  │ - Read-only files       │  │                        │
 │  │  │ Streaming  │  │ - PDF viewer            │  │                        │
 │  │  │            │  │ - Image/Video preview   │  │                        │
 │  │  └────────────┘  └─────────────────────────┘  │                        │
@@ -208,7 +208,7 @@ Business logic that doesn't belong to a single aggregate.
 - **AuthenticationService** - Validates credentials, issues JWT tokens
 - **AuthorizationService** - Enforces RBAC policies
 - **EncryptionService** - Encrypts/decrypts files and sensitive data
-- **VideoEncodingService** - Manages FFmpeg pipeline configuration
+- **VideoEncodingService** - Manages GStreamer pipeline configuration
 - **AuditService** - Records security events
 
 #### Value Objects
@@ -293,10 +293,10 @@ External systems driven by the application.
 - SQL queries and migrations
 - Connection pool management
 
-**FFmpeg Adapter** (`src/adapters/video/ffmpeg/`)
-- Video capture from Xvfb
-- H.264 encoding
-- Process management
+**GStreamer Adapter** (`backend/src/infrastructure/driven/sandbox/`)
+- Video capture from Xvfb via ximagesrc
+- VP8 encoding via vp8enc
+- Pipeline lifecycle management
 
 **Sandbox Adapter** (`src/adapters/sandbox/linux/`)
 - Linux namespace creation
@@ -408,26 +408,24 @@ trait EncryptionPort { ... }
 
 **Responsibilities:**
 - Implements `VideoEncodingPort` interface
-- Capture X11 display from isolated Xvfb instance
-- Encode video stream to H.264 with low-latency settings
-- Pipe encoded frames to WebRTC media track
-- Handle dynamic bitrate adjustment
+- Capture X11 display from isolated Xvfb instance via ximagesrc
+- Encode video stream to VP8 with low-latency settings
+- Pipe encoded frames to WebRTC media track via appsink
+- Handle pipeline lifecycle (start/stop per session)
 
 **Technology:**
-- FFmpeg via `ffmpeg-next` crate or process spawning
-- x11grab for display capture
-- H.264 codec with `tune=zerolatency`
-- Optional hardware acceleration (NVENC/VAAPI)
+- GStreamer via the `gstreamer` crate
+- ximagesrc for X11 display capture
+- VP8 codec via vp8enc
 
 **Pipeline:**
 ```
-Xvfb :100 → x11grab → H.264 Encoder → RTP Packetizer → WebRTC
+ximagesrc display=:N → videoconvert → capsfilter (I420) → vp8enc → appsink → WebRTC
 ```
 
 **Key Modules:**
-- `adapters::video::ffmpeg::capture` - X11 screen capture
-- `adapters::video::ffmpeg::encoder` - H.264 encoding
-- `adapters::video::ffmpeg::pipeline` - FFmpeg process management
+- `backend/src/infrastructure/driven/sandbox/gstreamer.rs` - GStreamer pipeline management
+- `backend/src/infrastructure/driven/sandbox/xvfb.rs` - Xvfb + XTEST input injection
 
 ### 4. WebRTC Adapter (Secondary)
 
@@ -455,7 +453,7 @@ Xvfb :100 → x11grab → H.264 Encoder → RTP Packetizer → WebRTC
 
 **Adapter:** `adapters::input::x11::X11InputAdapter`
 - Implements `InputInjectionPort`
-- Injects events into sandboxed X11 session via xdotool/uinput
+- Injects events into sandboxed X11 session via X11 XTEST extension (`xtest_fake_input` from x11rb)
 - Maps abstract input events to X11 protocol
 
 ### 6. Permission Domain (Aggregate + Repository)
@@ -496,7 +494,7 @@ Xvfb :100 → x11grab → H.264 Encoder → RTP Packetizer → WebRTC
    ↓
 6. Server launches Xvfb :100 in sandbox
    ↓
-7. Server starts FFmpeg capture → encoding
+7. Server starts GStreamer pipeline: ximagesrc → vp8enc → appsink
    ↓
 8. Server initiates WebRTC peer connection
    ↓
@@ -504,7 +502,7 @@ Xvfb :100 → x11grab → H.264 Encoder → RTP Packetizer → WebRTC
    ↓
 10. WebRTC connection established
    ↓
-11. Video stream flows: Xvfb → FFmpeg → WebRTC → Browser
+11. Video stream flows: Xvfb → GStreamer → WebRTC → Browser
 ```
 
 ### Input Handling
@@ -520,7 +518,7 @@ Xvfb :100 → x11grab → H.264 Encoder → RTP Packetizer → WebRTC
    ↓
 5. Server rate-limits (prevent abuse)
    ↓
-6. Server injects via xdotool into Xvfb :100
+6. Server injects via X11 XTEST (x11rb) into Xvfb :100
    ↓
 7. Application in sandbox receives input
 ```
@@ -532,7 +530,7 @@ Xvfb :100 → x11grab → H.264 Encoder → RTP Packetizer → WebRTC
    ↓
 2. Server closes WebRTC connection
    ↓
-3. Server stops FFmpeg process
+3. Server stops GStreamer pipeline
    ↓
 4. Server kills processes in PID namespace
    ↓
@@ -607,10 +605,10 @@ Xvfb :100 → x11grab → H.264 Encoder → RTP Packetizer → WebRTC
 | Component | Latency | Notes |
 |-----------|---------|-------|
 | Namespace creation | <5ms | User namespace setup |
-| Xvfb startup | ~50ms | Virtual display initialization |
-| FFmpeg encoding | 16-33ms | At 30-60 FPS |
+| Xvfb startup | ~50ms (polls for X11 socket) | Virtual display initialization |
+| GStreamer encoding | 16-33ms | At 30-60 FPS |
 | WebRTC transmission | 20-100ms | Network dependent |
-| Input injection | <1ms | xdotool overhead |
+| Input injection | <1ms | X11 XTEST overhead |
 | **Total (local)** | **~100ms** | Glass-to-glass latency |
 
 ### Resource Usage (per session)
@@ -662,7 +660,7 @@ The system uses a **multi-layer logging approach** for comprehensive traceabilit
 │     → Synchronous, high-priority                   │
 │                                                     │
 │  4. Adapter Logging (Infrastructure)               │
-│     → Database, FFmpeg, WebRTC, Sandbox            │
+│     → Database, GStreamer, WebRTC, Sandbox          │
 │                                                     │
 │  5. Structured Tracing (Development)               │
 │     → Performance metrics, debugging               │
@@ -694,7 +692,7 @@ See [TRACEABILITY.md](TRACEABILITY.md) for detailed tradeoff analysis and implem
 | WebRTC | webrtc-rs | Pure Rust WebRTC implementation |
 | Database | PostgreSQL | ACID compliance, mature |
 | DB Client | sqlx | Async, compile-time query checking |
-| Video Encoding | FFmpeg | Industry standard, hardware accel |
+| Video Encoding | GStreamer (VP8) | Flexible pipeline, ximagesrc capture |
 | Sandboxing | Namespaces | Native Linux, zero overhead |
 | Filesystem Control | Landlock | Kernel-enforced, unprivileged |
 | Syscall Filter | seccomp-bpf | Attack surface reduction |

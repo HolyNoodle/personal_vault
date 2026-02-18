@@ -17,7 +17,7 @@ The Secure Sandbox Platform is a sandboxed application hosting system where all 
 **How It Works**:
 ```
 Browser → WebRTC (VP8) ← GStreamer ximagesrc :N ← Xvfb :N ← App (any X11 UI)
-   ↓ input events (WS) → xdotool --display :N
+   ↓ input events (WS) → X11 XTEST (x11rb) :N
 ```
 
 **Execution Flow**:
@@ -26,17 +26,17 @@ Browser → WebRTC (VP8) ← GStreamer ximagesrc :N ← Xvfb :N ← App (any X11
 3. Backend starts GStreamer pipeline: `ximagesrc display=:N ! vp8enc ! webrtcbin`
 4. Backend spawns app inside sandbox with `DISPLAY=:N`
 5. App connects to Xvfb and renders with its chosen X11 UI framework
-6. Video stream flows to browser via WebRTC; input events from browser → xdotool → Xvfb
+6. Video stream flows to browser via WebRTC; input events from browser → X11 XTEST (x11rb) → Xvfb
 
 ---
 
 > **Status (WIP)**:
 > - GStreamer VP8 + WebRTC video track: **implemented**
 > - WebSocket signaling + input routing: **implemented**
-> - Xvfb-per-session + ximagesrc capture: **planned**
-> - xdotool input injection: **planned**
+> - Xvfb-per-session + ximagesrc capture: **implemented**
+> - X11 XTEST input injection (x11rb): **implemented**
 > - Native process sandbox (mount namespace + Landlock): **planned**
-> - File-explorer WASM prototype: **reference only, not production model**
+> - File-explorer native X11 binary (eframe/egui): **implemented — current production model**
 > - `sandbox-app-sdk`: **planned** (business logic only, no rendering)
 > - WebRTC security hardening (WSS, auth on `/ws`, encrypted TURN, input via data channel): **not yet implemented — see Security Considerations**
 
@@ -109,12 +109,10 @@ Client permissions are **not a fixed platform-wide policy**. Instead, they are c
 
 ### Technical Implementation
 
-**WASM prototype — reference/prototype only** (`apps/file-explorer/`):
+**Native binary** (`apps/file-explorer/`):
 
-The existing file-explorer is a WASM binary built with egui + a software rasterizer + wasmtime. It established the egui render-loop pattern but is **not the production architecture**. It is kept as a reference.
+The file-explorer is a standard native Linux binary built with `eframe` (egui + winit, X11 feature). It reads `DISPLAY` from the environment variable set by the backend, connects to `Xvfb :N`, and renders using the normal X11 path. This is the current production model.
 
-**Production model (target)**:
-- Standard native Linux binary; connects to `Xvfb :N` via the `DISPLAY` environment variable set by the backend
 - Any X11-capable UI framework — GTK4, Iced, Qt, egui+winit, etc.
 - No platform-specific rendering code; no framebuffer accessors; no exported C-ABI frame functions
 
@@ -150,13 +148,7 @@ No shared memory, no custom frame IPC, no framebuffer accessors.
 
 ### Input forwarding
 
-The backend receives keyboard and mouse events from the browser over WebSocket and injects them into the Xvfb display using `xdotool`:
-
-```
-xdotool type --display :N "<text>"
-xdotool mousemove --display :N x y
-xdotool click --display :N 1
-```
+The backend receives keyboard and mouse events from the browser over WebSocket and injects them into the Xvfb display using the X11 XTEST extension via the `x11rb` crate (`xtest_fake_input`). Mouse moves, button presses, and key events are all injected as synthetic X11 events directly over the existing x11rb connection to the display.
 
 The app receives normal X11 input events — no special input handling code required.
 
@@ -180,9 +172,9 @@ The interface between the platform backend and a running app instance uses two c
 
 The app connects to `Xvfb :N` via the `DISPLAY=:N` environment variable. Frame capture is handled entirely by GStreamer (`ximagesrc`) on the backend side. The app writes no special rendering code — it is a standard X11 application.
 
-### Input (xdotool → Xvfb)
+### Input (X11 XTEST → Xvfb)
 
-Browser input events are received by the backend over WebSocket and injected into the Xvfb display using `xdotool`. The app receives normal X11 input events with no special input handling required.
+Browser input events are received by the backend over WebSocket and injected into the Xvfb display via the X11 XTEST extension (`xtest_fake_input` from the `x11rb` crate). The app receives normal X11 input events with no special input handling required.
 
 ### Optional capability socket (app → backend)
 
@@ -332,7 +324,7 @@ sandbox_app_sdk::notify::download_ready(path, filename);
 
 ## Architecture Diagrams
 
-> **Note**: The WebRTC signaling channel currently uses plain `ws://` and lacks authentication — production hardening is required (see Security Considerations). The file-explorer WASM prototype is reference only; production model is Xvfb + native X11 apps.
+> **Note**: The WebRTC signaling channel currently uses plain `ws://` and lacks authentication — production hardening is required (see Security Considerations). The file-explorer is a native X11 binary running under Xvfb — the current production model.
 
 ### Flow
 
@@ -351,7 +343,7 @@ sandbox_app_sdk::notify::download_ready(path, filename);
 │                    BACKEND SERVER (Rust/Axum)                    │
 │  ┌─────────────┐  ┌──────────────┐  ┌────────────────────────┐  │
 │  │ App Manager │  │ WebRTC       │  │ Input Event Router     │  │
-│  │             │  │ Signaling    │  │ (xdotool --display :N) │  │
+│  │             │  │ Signaling    │  │ (X11 XTEST via x11rb)  │  │
 │  └─────────────┘  └──────────────┘  └────────────────────────┘  │
 │         │                 │                      │               │
 │         ∨                 ∨                      ∨               │
@@ -452,7 +444,7 @@ pub enum SessionState {
 6. Backend spawns the app binary inside the sandbox with `DISPLAY=:N`
 7. Backend creates WebRTC peer connection, returns session ID + WebRTC offer
 8. Client accepts offer, establishes WebRTC connection
-9. Video stream flows to client; input events flow back over WebSocket → xdotool → Xvfb → app
+9. Video stream flows to client; input events flow back over WebSocket → X11 XTEST (x11rb) → Xvfb → app
 
 ---
 
@@ -485,14 +477,14 @@ pub enum SessionState {
 - [x] GStreamer VP8 encode + WebRTC video track (DTLS-SRTP)
 - [x] WebSocket signaling (offer/answer/ICE exchange)
 - [x] Input forwarding over WebSocket signaling channel
-- [x] File explorer WASM prototype (egui, software rasterizer) — reference only, not production model
+- [x] File explorer native X11 binary (eframe/egui + winit, X11 feature) — current production model
 - [ ] WebRTC security hardening (WSS, endpoint auth, encrypted TURN, data channel for input)
 
 ### Phase 2: Xvfb + ximagesrc integration
-- [ ] Xvfb-per-session lifecycle management (start/stop/display number pool)
-- [ ] GStreamer pipeline: `ximagesrc display=:N fps=30 ! vp8enc ! webrtcbin` (replaces appsrc)
-- [ ] xdotool input injection (keyboard + mouse → Xvfb display)
-- [ ] X11 socket bind-mount into sandbox namespace
+- [x] Xvfb-per-session lifecycle management (start/stop/display number pool)
+- [x] GStreamer pipeline: `ximagesrc display=:N fps=30 ! vp8enc ! webrtcbin` (replaces appsrc)
+- [x] X11 XTEST input injection via x11rb (keyboard + mouse → Xvfb display)
+- [x] X11 socket bind-mount into sandbox namespace
 
 ### Phase 3: Native process sandbox
 - [ ] Sandbox orchestrator: fork + mount namespace + Landlock + seccomp + cgroups applied before exec
@@ -501,7 +493,7 @@ pub enum SessionState {
 
 ### Phase 4: sandbox-app-sdk
 - [ ] `crates/sandbox-app-sdk/` — manifest types, capability notification helpers
-- [ ] Port file-explorer from WASM prototype to native X11 binary
+- [x] File-explorer native X11 binary (implemented; eframe/egui + X11 feature)
 - [ ] SDK documentation and example app
 
 ### Phase 5: Advanced features + additional applications

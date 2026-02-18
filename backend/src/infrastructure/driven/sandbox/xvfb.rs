@@ -78,10 +78,20 @@ impl XvfbManager {
 
         debug!("Xvfb process spawned for session {}", session_id);
 
-        // Give Xvfb time to initialize
-        debug!("Sleeping 500ms to let Xvfb initialize for session {}", session_id);
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        debug!("Done sleeping, about to connect to Xvfb with x11rb for session {}", session_id);
+        // Poll for the X11 socket to appear instead of sleeping a fixed amount
+        debug!("Polling for X11 socket to appear for session {}", session_id);
+        let socket_path = format!("/tmp/.X11-unix/X{}", display_number);
+        let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(5);
+        loop {
+            if std::path::Path::new(&socket_path).exists() {
+                break;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                anyhow::bail!("Xvfb did not create socket {} within 5s", socket_path);
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+        debug!("X11 socket appeared, connecting to Xvfb for session {}", session_id);
 
         // Hide the mouse cursor by setting a blank cursor using xsetroot
         // This will affect all windows on this Xvfb display
