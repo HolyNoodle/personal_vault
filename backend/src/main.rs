@@ -15,10 +15,10 @@ mod infrastructure;
 
 use infrastructure::driving::{WebRTCAdapter};
 use infrastructure::driven::{XvfbManager, IpcSocketServer};
-use infrastructure::driven::persistence::{SqliteCredentialRepository, RedisChallengeRepository, SqliteUserRepository};
+use infrastructure::driven::persistence::{SqliteCredentialRepository, RedisChallengeRepository, SqliteUserRepository, SqliteInvitationRepository, SqliteFilePermissionRepository};
 use axum::routing::post;
 use infrastructure::driving::http::auth;
-use application::ports::{CredentialRepository, ChallengeRepository};
+use application::ports::{CredentialRepository, ChallengeRepository, InvitationRepository, FilePermissionRepository};
 
 use diesel::r2d2::{self, ConnectionManager};
 use diesel::SqliteConnection;
@@ -97,8 +97,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize auth repositories
     let user_repo = Arc::new(SqliteUserRepository::new(pool.clone()))
         as Arc<dyn crate::application::ports::user_repository::UserRepository>;
-    let credential_repo = Arc::new(SqliteCredentialRepository::new(pool))
+    let credential_repo = Arc::new(SqliteCredentialRepository::new(pool.clone()))
         as Arc<dyn CredentialRepository>;
+    let invitation_repo = Arc::new(SqliteInvitationRepository::new(pool.clone()))
+        as Arc<dyn InvitationRepository>;
+    let file_permission_repo = Arc::new(SqliteFilePermissionRepository::new(pool))
+        as Arc<dyn FilePermissionRepository>;
 
     // Initialize Redis challenge repository
     let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
@@ -115,6 +119,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         user_repo,
         credential_repo,
         challenge_repo,
+        invitation_repo,
+        file_permission_repo,
     };
 
     // Initialize infrastructure adapters
@@ -155,6 +161,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/applications", get(infrastructure::driving::http::application_routes::list_applications))
         .route("/api/applications/launch", post(infrastructure::driving::http::application_routes::launch_application));
 
+    use infrastructure::driving::http::{owner, client, invite};
+    // Owner routes (require Owner role — enforced in handlers)
+    let owner_routes = Router::new()
+        .route("/api/invitations", post(owner::invitations::create_invitation))
+        .route("/api/permissions", get(owner::permissions::list_permissions))
+        .route("/api/permissions/{id}", axum::routing::delete(owner::permissions::revoke_permission))
+        .with_state(app_state.clone());
+
+    // Client routes (require Client role — enforced in handlers)
+    let client_routes = Router::new()
+        .route("/api/my-permissions", get(client::my_permissions::list_my_permissions))
+        .with_state(app_state.clone());
+
+    // Invite routes (public)
+    let invite_routes = Router::new()
+        .route("/api/invitations/{token}", get(invite::view::view_invitation))
+        .route("/api/invitations/{token}/accept/initiate", post(invite::initiate::initiate_webauthn_registration))
+        .route("/api/invitations/{token}/accept/complete", post(invite::complete::complete_webauthn_registration))
+        .with_state(app_state.clone());
+
     // Custom middleware: 503 if not initialized and not /api/setup/* or /health
     use axum::{middleware::Next, http::{Request, StatusCode}, response::Response, body::Body};
 
@@ -182,6 +208,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(auth_routes)
         .merge(ws_routes)
         .merge(app_routes)
+        .merge(owner_routes)
+        .merge(client_routes)
+        .merge(invite_routes)
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)

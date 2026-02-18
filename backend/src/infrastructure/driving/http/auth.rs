@@ -58,7 +58,7 @@ pub struct UserInfo {
     pub id: String,
     pub email: String,
     pub display_name: String,
-    pub role: String,
+    pub roles: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -143,7 +143,7 @@ async fn complete_login(
             id: result.user_id,
             email: result.email,
             display_name: result.display_name,
-            role: result.role,
+            roles: result.roles,
         },
     }))
 }

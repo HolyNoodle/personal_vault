@@ -4,14 +4,11 @@ pub mod user_repository;
 pub mod credential_repository;
 pub mod challenge_repository;
 pub mod application_ports;
+pub mod invitation_repository;
+pub mod file_permission_repository;
 
 // Removed pub use for UserRepository
 pub use credential_repository::CredentialRepository;
 pub use challenge_repository::ChallengeRepository;
-
-// Legacy video ports (being phased out)
-// Removed pub use for deleted video port traits
-
-// New application-centric ports
-    // Removed pub use for deleted application port traits and structs
-// Removed stray closing delimiter
+pub use invitation_repository::InvitationRepository;
+pub use file_permission_repository::FilePermissionRepository;

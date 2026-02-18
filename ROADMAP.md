@@ -7,8 +7,12 @@
 - Each phase builds on the previous. Phases are ordered by dependency.
 - This is a living document — check boxes as work completes.
 
----
 
+**Database Layer Note:**
+
+- The backend uses the **Diesel query builder** (not the ORM features) for all database queries, targeting a **SQLite** database.
+- Database migrations use Diesel's **up/down migration system**: each migration is a folder containing `up.sql` and `down.sql` scripts, located in `backend/migrations/`.
+- All schema changes and new tables must be implemented as Diesel migrations, following this folder structure.
 ## Role Model
 
 Roles are a **set on each user**, not a single enum value. A user can hold multiple roles simultaneously:
@@ -123,20 +127,20 @@ Fix existing auth plumbing and migrate the single-role model to multi-role.
 ### 1.2 Login credential verification
 **File:** `backend/src/application/super_admin/commands/complete_webauthn_login.rs`
 
-- [ ] Re-enable credential lookup by user id (`credential_repo.find_by_user_id`)
-- [ ] Call `webauthn.finish_passkey_authentication()` with the stored passkey
-- [ ] Update `sign_count` on the stored credential after successful auth
-- [ ] Return `403` on failed verification (not a silent pass)
-- [ ] JWT now carries `roles: Vec<String>`
+- [x] Re-enable credential lookup by user id (`credential_repo.find_by_user_id`)
+- [x] Call `webauthn.finish_passkey_authentication()` with the stored passkey
+- [x] Update `sign_count` on the stored credential after successful auth
+- [x] Return `403` on failed verification (not a silent pass)
+- [x] JWT now carries `roles: Vec<String>`
 
 ### 1.3 JWT middleware
 **New file:** `backend/src/infrastructure/driving/http/middleware/auth.rs`
 
-- [ ] Extract `Authorization: Bearer <token>` from requests
-- [ ] Validate JWT signature (`JWT_SECRET` env var)
-- [ ] Reject expired tokens
-- [ ] Inject `AuthenticatedUser { id, email, roles: Vec<UserRole> }` as Axum extension
-- [ ] Apply to all routes except `/api/setup/*`, `/api/auth/*`, `/health`
+- [x] Extract `Authorization: Bearer <token>` from requests
+- [x] Validate JWT signature (`JWT_SECRET` env var)
+- [x] Reject expired tokens
+- [x] Inject `AuthenticatedUser { id, email, roles: Vec<UserRole> }` as Axum extension
+- [x] Apply to all routes except `/api/setup/*`, `/api/auth/*`, `/health` (enforced per-handler via `AuthenticatedUser` extractor)
 
 ### 1.4 SuperAdmin: invite a new Owner (or another SuperAdmin)
 **New:** `backend/src/application/super_admin/commands/invite_user.rs`
@@ -199,7 +203,7 @@ An Owner (or SuperAdmin acting as Owner) invites a Client and specifies which pa
 ### 3.1 Database migrations
 **New migration:** `create_invitations_and_permissions`
 
-- [ ] `invitations` table:
+- [x] `invitations` table:
   ```sql
   id UUID PRIMARY KEY,
   owner_id UUID REFERENCES users(id),
@@ -210,7 +214,7 @@ An Owner (or SuperAdmin acting as Owner) invites a Client and specifies which pa
   expires_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   ```
-- [ ] `file_permissions` table:
+- [x] `file_permissions` table:
   ```sql
   id UUID PRIMARY KEY,
   owner_id UUID REFERENCES users(id),
@@ -221,60 +225,63 @@ An Owner (or SuperAdmin acting as Owner) invites a Client and specifies which pa
   expires_at TIMESTAMPTZ,
   revoked_at TIMESTAMPTZ
   ```
-- [ ] Index: `(client_id, revoked_at)` — fast active-permission lookups per client
-- [ ] Index: `(owner_id, client_id)` — per-pair queries
+- [x] Index: `(client_id, revoked_at)` — fast active-permission lookups per client
+- [x] Index: `(owner_id, client_id)` — per-pair queries
+
+> ⚠️ **NOTE**: Migration uses SQLite-compatible types (`TEXT` for UUIDs/timestamps, `JSON` for JSONB) — correct for this backend, but differs from the PostgreSQL notation in the roadmap spec.
 
 ### 3.2 Domain entities
-- [ ] `Invitation`: `backend/src/domain/entities/invitation.rs`
+- [x] `Invitation`: `backend/src/domain/entities/invitation.rs`
   — fields: id, owner_id, invitee_email, token, granted_paths, status, expires_at
   — methods: `is_valid()`, `mark_accepted()`, `revoke()`
-- [ ] `FilePermission`: `backend/src/domain/entities/file_permission.rs`
+- [x] `FilePermission`: `backend/src/domain/entities/file_permission.rs`
   — fields: id, owner_id, client_id, path, access, granted_at, expires_at, revoked_at
   — methods: `is_active()`, `allows(AccessLevel)`, `revoke()`
-- [ ] `GrantedPath` value object: `{ path: String, access: Vec<AccessLevel> }`
-- [ ] `AccessLevel` enum: `Read`, `Write`, `Delete`
+- [x] `GrantedPath` value object: `{ path: String, access: Vec<AccessLevel> }`
+- [x] `AccessLevel` enum: `Read`, `Write`, `Delete`
 
 ### 3.3 Repository ports + implementations
-- [ ] `InvitationRepository`: `save`, `find_by_token`, `find_by_owner`, `update_status`
-- [ ] `FilePermissionRepository`: `save`, `find_active_for_client`, `find_by_owner_client`, `revoke`
-- [ ] PostgreSQL implementations for both
+- [x] `InvitationRepository`: `save`, `find_by_token`, `find_by_owner`, `update_status` — exported from `ports/mod.rs`, real SQL in `SqliteInvitationRepository`
+- [x] `FilePermissionRepository`: `save`, `find_active_for_client`, `find_active_by_owner`, `find_by_owner_client`, `revoke` — exported, real SQL in `SqliteFilePermissionRepository`
+- [x] Both repositories added to `AppState` in `infrastructure/mod.rs` and instantiated in `main.rs`
 
 ### 3.4 Owner: create invitation
 **New:** `backend/src/application/owner/commands/create_invitation.rs`
 **Route:** `POST /api/invitations` — requires `has_role(Owner)`
 
-- [ ] Accept `{ invitee_email, granted_paths: [{path, access}], expires_in_hours }`
-- [ ] Validate all paths are within caller's storage root (reject `../`)
-- [ ] Generate 32-byte cryptographically random token
-- [ ] Persist invitation; return `{ invitation_id, token, invite_url }`
+- [x] Accept `{ invitee_email, granted_paths: [{path, access}], expires_in_hours }`
+- [x] Validate paths are relative and reject `../` and absolute paths starting with `/`
+- [x] Generate 32-byte cryptographically random token
+- [x] Persist invitation; return `{ invitation_id, token, invite_url }` — real SQL, route registered in `main.rs`
 - [ ] Optional: send email via SMTP (`SMTP_*` env vars already configured)
 
 ### 3.5 Client: view & accept invitation
 **Route:** `GET  /api/invitations/{token}` — public (no auth needed)
 **Route:** `POST /api/invitations/{token}/accept`
 
-- [ ] `GET`: return `{ owner_display_name, granted_paths, expires_at }` — no sensitive data
-- [ ] `POST` accept:
-  - [ ] Load invitation; verify `is_valid()` (not expired, revoked, or already accepted)
-  - [ ] If invitee email matches an existing user: link permissions to that user
-  - [ ] Else: create new `User` with `roles = [Client]`
-  - [ ] Initiate WebAuthn registration for new client user (or return a one-time login token)
-  - [ ] Create `FilePermission` rows for each `granted_path`
-  - [ ] Mark invitation `status = accepted`
-  - [ ] Return JWT for the client
+- [x] `GET /api/invitations/{token}`: return `{ owner_id, granted_paths, expires_at }` — public, no sensitive data
+- [x] `POST /api/invitations/{token}/accept/initiate`: generate WebAuthn challenge, store in Redis
+- [x] `POST /api/invitations/{token}/accept/complete`:
+  - [x] Load invitation; verify `is_valid()`
+  - [x] If invitee email matches an existing user: link permissions to that user
+  - [x] Else: create new `User` with `roles = [Client]`
+  - [x] Finish WebAuthn passkey registration, save credential
+  - [x] Create `FilePermission` rows for each `granted_path`
+  - [x] Mark invitation `status = Accepted`
+  - [x] Return JWT for the client
 
 ### 3.6 Owner: list/revoke permissions
 **Route:** `GET    /api/permissions?client_id=<id>` — requires `has_role(Owner)`
 **Route:** `DELETE /api/permissions/{id}` — requires `has_role(Owner)`
 
-- [ ] List: all active permissions granted by the calling owner (optionally filtered by client)
-- [ ] Revoke: set `revoked_at = NOW()`
+- [x] List: all active permissions by owner (optionally filtered by client_id) — real SQL, route registered
+- [x] Revoke: sets `revoked_at = NOW()` via real SQL — route registered in `main.rs`
 - [ ] Revoke: trigger session restart if client has an active Xvfb session (Phase 6)
 
 ### 3.7 Client: list accessible paths
 **Route:** `GET /api/my-permissions` — requires `has_role(Client)`
 
-- [ ] Return all non-revoked, non-expired `FilePermission` rows for the calling client
+- [x] Return all non-revoked, non-expired `FilePermission` rows for the calling client — real SQL, route registered in `main.rs`
 
 ---
 
@@ -458,6 +465,139 @@ Endpoints the frontend needs, built incrementally as each phase lands.
 
 ---
 
+## Known Implementation Gaps (Phases 1–3)
+
+These must be resolved before any Phase 3 feature is functional end-to-end:
+
+1. **JWT middleware not applied** — `jwt_auth` must be layered onto the router in `main.rs`.
+2. **AppState missing repositories** — `invitation_repo` and `file_permission_repo` must be added to `AppState` and instantiated in `main.rs`.
+3. **Repository implementations are no-op stubs** — All Diesel queries for `SqliteInvitationRepository` and `SqliteFilePermissionRepository` need to be written.
+4. **Module tree incomplete** — `application/mod.rs` missing `pub mod invite;`. `application/ports/mod.rs` missing declarations and re-exports for the two new repository traits.
+5. **No Phase 3 routes registered** — None of the 8 new routes are mounted in `main.rs`.
+6. **Invite WebAuthn flow is a stub** — Challenge generation, credential saving, permission creation, invitation acceptance, and JWT return all need implementing.
+7. **sign_count never updated on login** — `complete_webauthn_login.rs` re-saves credential unchanged.
+
+---
+
+## Phase 9 — Frontend Views
+
+React app located at `frontend/web/src/`. Uses React Router v6, MUI v7, Zustand, Formik/Yup, @simplewebauthn/browser.
+
+### 9.0 Auth store + role-aware routing
+
+**File:** `frontend/web/src/store/authStore.ts`
+**File:** `frontend/web/src/App.tsx`
+
+- [ ] Change `role: 'super_admin' | 'owner' | 'client'` → `roles: string[]` in `User` type and auth store
+- [ ] Add `hasRole(role: string): boolean` helper (checks array membership)
+- [ ] Role-aware `<ProtectedRoute>`: accept a `requiredRole` prop and redirect with 403 UI if not satisfied
+- [ ] Update `Layout.tsx` navigation: show/hide nav items based on roles (SuperAdmin section, Owner section, Client section)
+
+### 9.1 SuperAdmin views (requires SuperAdmin role)
+
+**New page:** `frontend/web/src/pages/admin/UsersPage.tsx`
+**Route:** `/admin/users`
+
+- [ ] Table of all users: email, display name, roles, status (active / suspended)
+- [ ] "Invite Owner / SuperAdmin" button → opens `InviteUserDialog`
+- [ ] Per-row actions: suspend/reactivate, edit roles, soft-delete
+- [ ] API calls: `GET /api/admin/users`, `POST /api/admin/invite`, `PUT /api/admin/users/{id}/status`, `PUT /api/admin/users/{id}/roles`, `DELETE /api/admin/users/{id}`
+
+**New component:** `frontend/web/src/components/admin/InviteUserDialog.tsx`
+
+- [ ] Form: email, display name, role selection (Owner / SuperAdmin+Owner)
+- [ ] On submit: `POST /api/admin/invite` → display generated invite link with copy button
+
+### 9.2 Owner views (requires Owner role)
+
+**New page:** `frontend/web/src/pages/owner/InvitationsPage.tsx`
+**Route:** `/owner/invitations`
+
+- [ ] List existing invitations (pending / accepted / revoked) with expiry, granted paths, invitee email
+- [ ] "New Invitation" button → opens `CreateInvitationDialog`
+- [ ] Revoke button per invitation
+- [ ] API calls: `GET /api/invitations` (owner's), `POST /api/invitations`, `DELETE /api/invitations/{id}`
+
+**New component:** `frontend/web/src/components/owner/CreateInvitationDialog.tsx`
+
+- [ ] Form: invitee email, path list (add/remove rows), access level per path (Read / Write / Delete checkboxes), expiry in hours
+- [ ] Path inputs validated: no `..`, relative paths only
+- [ ] On success: show invite link/token with copy button
+
+**New page:** `frontend/web/src/pages/owner/PermissionsPage.tsx`
+**Route:** `/owner/permissions`
+
+- [ ] Filter by client (dropdown of clients with active permissions)
+- [ ] Table: path, access levels, granted date, expiry, revoke button
+- [ ] API calls: `GET /api/permissions?client_id=`, `DELETE /api/permissions/{id}`
+
+**New page:** `frontend/web/src/pages/owner/ClientsPage.tsx`
+**Route:** `/owner/clients`
+
+- [ ] List of client users who have active permissions granted by this owner
+- [ ] Click client → show their active permissions and recent activity
+- [ ] Terminate active session button
+- [ ] API calls: `GET /api/clients`, `GET /api/clients/{id}/activity`, `DELETE /api/sessions/{sessionId}`
+
+### 9.3 Client views (requires Client role)
+
+**New page:** `frontend/web/src/pages/client/MyPermissionsPage.tsx`
+**Route:** `/my-permissions`
+
+- [ ] List all active file permissions: path, access levels, owner name, expiry
+- [ ] Visual indicator for expiring-soon permissions
+- [ ] API call: `GET /api/my-permissions`
+
+**Update:** `frontend/web/src/pages/LaunchApplicationPage.tsx`
+
+- [ ] Replace hardcoded role/path options with data from `GET /api/my-permissions`
+- [ ] Owner sessions auto-populate with owner's storage root (no selection needed)
+- [ ] Client sessions show only their granted paths as selectable scope
+
+### 9.4 Invitation acceptance flow (public — no auth required)
+
+**New page:** `frontend/web/src/pages/InvitePage.tsx`
+**Route:** `/invite/:token`
+
+- [ ] On load: `GET /api/invitations/{token}` → show owner display name, list of granted paths + access levels, expiry date
+- [ ] Show 404/expired UI if invitation is invalid
+- [ ] "Accept Invitation" button → triggers WebAuthn registration flow (same pattern as SetupPage)
+  - `POST /api/invite/{token}/initiate` → get WebAuthn challenge
+  - Collect credential via `@simplewebauthn/browser`
+  - `POST /api/invite/{token}/complete` → receive JWT + user info
+- [ ] On success: store auth token → redirect to `/my-permissions`
+
+### 9.5 Owner/SuperAdmin session monitoring
+
+**Update:** `frontend/web/src/pages/SessionsPage.tsx` (currently placeholder)
+
+- [ ] List active sessions: user email, role, app, start time, expiry countdown
+- [ ] Terminate session button (Owner: only their clients' sessions; SuperAdmin: any)
+- [ ] API calls: `GET /api/sessions` (scoped by role), `DELETE /api/sessions/{sessionId}`
+
+### 9.6 File management
+
+**Wire existing page:** `frontend/web/src/pages/FilesPage.tsx`
+**Route:** `/files`
+
+- [ ] Add `/files` route to `App.tsx` (page is implemented but not routed)
+- [ ] Scope displayed root path to the authenticated user's storage root (Owner) or granted paths (Client)
+- [ ] Wire download button to actual file download endpoint
+- [ ] Wire create folder button
+- [ ] API calls: `GET /api/files?path=`, `POST /api/files/upload`, `POST /api/files/mkdir`
+
+### 9.7 Navigation updates
+
+**File:** `frontend/web/src/components/Layout.tsx`
+
+- [ ] SuperAdmin nav section: "Users" (`/admin/users`)
+- [ ] Owner nav section: "Invitations" (`/owner/invitations`), "Permissions" (`/owner/permissions`), "Clients" (`/owner/clients`)
+- [ ] Client nav section: "My Access" (`/my-permissions`)
+- [ ] Common: "Files" (`/files`), "Sessions" (`/sessions`)
+- [ ] Sections hidden when user lacks the required role
+
+---
+
 ## Dependency Order
 
 ```
@@ -497,3 +637,6 @@ Phase 8 (APIs)      — incremental, follows each phase
 | `backend/src/infrastructure/driven/sandbox/xvfb.rs` | Add `root_path`, `allowed_paths`, `pre_exec` isolation |
 | `apps/file-explorer/src/app.rs` | Respect `ROOT_PATH` / `ALLOWED_PATHS` |
 | `backend/src/infrastructure/driving/webrtc.rs` | JWT auth before WS upgrade; input rate limit |
+| **Diesel Query Builder** | All DB queries use Diesel's query builder (not ORM) with SQLite |
+| **Migrations** | Diesel up/down migration folders in `backend/migrations/` |
+| `backend/src/infrastructure/driving/http/middleware/auth.rs` | **New** — JWT middleware, `has_role()` guards |

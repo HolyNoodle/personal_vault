@@ -2,8 +2,7 @@
 // Implements interfaces defined in application layer
 
 use std::sync::Arc;
-// ...existing code...
-use crate::application::ports::{CredentialRepository, ChallengeRepository};
+use crate::application::ports::{CredentialRepository, ChallengeRepository, InvitationRepository, FilePermissionRepository};
 
 pub mod driven;    // Output adapters (repositories, external services)
 pub mod driving;   // Input adapters (HTTP, CLI, etc.)
@@ -15,8 +14,6 @@ pub struct AppState {
     pub user_repo: Arc<dyn crate::application::ports::user_repository::UserRepository>,
     pub credential_repo: Arc<dyn CredentialRepository>,
     pub challenge_repo: Arc<dyn ChallengeRepository>,
+    pub invitation_repo: Arc<dyn InvitationRepository>,
+    pub file_permission_repo: Arc<dyn FilePermissionRepository>,
 }
-
-// Removed unused structs AuthUser and Claims
-
-// Removed unused AuthUser and Claims extraction logic

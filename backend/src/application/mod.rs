@@ -4,4 +4,5 @@
 pub mod super_admin;
 pub mod owner;
 pub mod client;
+pub mod invite;
 pub mod ports;
