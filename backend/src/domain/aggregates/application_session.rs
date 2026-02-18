@@ -108,7 +108,7 @@ impl Default for VideoConfig {
         Self {
             width: 1920,
             height: 1080,
-            framerate: 30,
+            framerate: 60,
             codec: VideoCodec::H264,
         }
     }

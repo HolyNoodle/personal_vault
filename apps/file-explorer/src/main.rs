@@ -11,10 +11,21 @@ fn main() -> eframe::Result {
         .ok()
         .and_then(|h| h.parse::<f32>().ok())
         .unwrap_or(600.0);
+    let viewport = egui::ViewportBuilder::default()
+        .with_title("File Explorer")
+        .with_inner_size([width, height])
+        .with_fullscreen(false)
+        .with_decorations(true)
+        .with_visible(true)
+        .with_drag_and_drop(true)
+        .with_resizable(true)
+        .with_transparent(false);
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("File Explorer")
-            .with_inner_size([width, height]),
+        viewport,
+        vsync: true, // 60 FPS if monitor supports it
+        multisampling: 0,
+        hardware_acceleration: eframe::HardwareAcceleration::Preferred,
+        run_and_return: false,
         ..Default::default()
     };
     eframe::run_native(

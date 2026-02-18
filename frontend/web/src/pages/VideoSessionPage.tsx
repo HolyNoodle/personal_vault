@@ -59,7 +59,7 @@ export const VideoSessionPage: React.FC = () => {
         user_id: user.id,
         width: finalWidth,
         height: finalHeight,
-        framerate: 15,
+        framerate: 60,
         application: 'xterm',
       })
 
