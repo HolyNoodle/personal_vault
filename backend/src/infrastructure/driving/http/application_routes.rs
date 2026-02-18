@@ -1,9 +1,7 @@
 use axum::debug_handler;
-use axum::extract::State;
 use axum::Json;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use crate::infrastructure::driving::http::video_api::ApiState;
+// use crate::infrastructure::driving::http::video_api::ApiState;
 
 #[derive(Serialize)]
 pub struct ApplicationMetadata {
@@ -38,7 +36,6 @@ pub struct LaunchApplicationResponse {
 
 #[debug_handler]
 pub async fn launch_application(
-    State(_state): State<Arc<ApiState>>,
     Json(payload): Json<LaunchApplicationRequest>,
 ) -> Json<LaunchApplicationResponse> {
     tracing::info!(

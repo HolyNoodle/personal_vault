@@ -17,10 +17,8 @@ mod infrastructure;
 use infrastructure::driving::{WebRTCAdapter};
 use infrastructure::driven::{XvfbManager, IpcSocketServer};
 use infrastructure::driven::persistence::{PostgresCredentialRepository, RedisChallengeRepository};
-use infrastructure::driving::http::video_api::{ApiState, create_video_api_router};
 use axum::routing::post;
 use infrastructure::driving::http::auth;
-use application::client::commands::{CreateSessionHandler, TerminateSessionHandler};
 use application::ports::{CredentialRepository, ChallengeRepository};
 
 #[tokio::main]
@@ -106,24 +104,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let apps_root = std::env::var("APPS_ROOT").unwrap_or_else(|_| "/app/.app".to_string());
     let xvfb_manager = Arc::new(XvfbManager::new(apps_root));
 
-    // Initialize command handlers
-    let create_session_handler = Arc::new(CreateSessionHandler::new(
-        xvfb_manager.clone(),
-    ));
-
-    let terminate_session_handler = Arc::new(TerminateSessionHandler::new(
-        xvfb_manager.clone(),
-    ));
 
     // Initialize WebRTC adapter with XvfbManager
     let webrtc_adapter = Arc::new(WebRTCAdapter::new(xvfb_manager.clone()));
 
     // Create API state
-    let api_state = Arc::new(ApiState {
-        create_session_handler,
-        terminate_session_handler,
-        webrtc_adapter: Arc::clone(&webrtc_adapter),
-    });
+    // ApiState and video session handlers removed
 
     // Build router
     let webrtc_clone = Arc::clone(&webrtc_adapter);
@@ -153,14 +139,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Application platform routes
     let app_routes = Router::new()
         .route("/api/applications", get(infrastructure::driving::http::application_routes::list_applications))
-        .route("/api/applications/launch", post(infrastructure::driving::http::application_routes::launch_application))
-        .with_state(api_state.clone());
+        .route("/api/applications/launch", post(infrastructure::driving::http::application_routes::launch_application));
 
     // Merge all routes
     let app = Router::new()
         .merge(auth_routes)
         .merge(ws_routes)
-        .merge(create_video_api_router(api_state))
         .merge(app_routes)
         .layer(
             CorsLayer::new()
@@ -179,9 +163,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   APPLICATION PLATFORM:");
     println!("   - GET  http://localhost:8080/api/applications");
     println!("   - POST http://localhost:8080/api/applications/launch");
-    println!("   VIDEO:");
-    println!("   - POST http://localhost:8080/api/sessions");
-    println!("   - WS   ws://localhost:8080/ws");
+    println!("   WEBSOCKET:");
+    println!("   - WS   ws://localhost:8080/ws (for application signaling, not video)");
     println!("   SYSTEM:");
     println!("   - GET  http://localhost:8080/health");
     println!();

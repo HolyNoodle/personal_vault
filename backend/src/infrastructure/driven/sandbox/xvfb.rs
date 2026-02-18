@@ -210,21 +210,12 @@ impl XvfbManager {
             tokio::spawn(async move {
                 let mut lines = reader.lines();
                 loop {
-                    let line_fut = lines.next_line();
-                    let timeout = tokio::time::sleep(tokio::time::Duration::from_secs(5));
-                    tokio::select! {
-                        line = line_fut => {
-                            match line {
-                                Ok(Some(line)) => {
-                                    info!("App stdout [{}]: {}", app, line);
-                                },
-                                Ok(None) => break,
-                                Err(e) => { error!("App stdout [{}] read error: {}", app, e); break; }
-                            }
-                        }
-                        _ = timeout => {
-                            error!("App stdout [{}]: No output for 5s, possible block", app);
-                        }
+                    match lines.next_line().await {
+                        Ok(Some(line)) => {
+                            info!("App stdout [{}]: {}", app, line);
+                        },
+                        Ok(None) => break,
+                        Err(e) => { error!("App stdout [{}] read error: {}", app, e); break; }
                     }
                 }
             });
@@ -237,21 +228,12 @@ impl XvfbManager {
             tokio::spawn(async move {
                 let mut lines = reader.lines();
                 loop {
-                    let line_fut = lines.next_line();
-                    let timeout = tokio::time::sleep(tokio::time::Duration::from_secs(5));
-                    tokio::select! {
-                        line = line_fut => {
-                            match line {
-                                Ok(Some(line)) => {
-                                    error!("App stderr [{}]: {}", app, line);
-                                },
-                                Ok(None) => break,
-                                Err(e) => { error!("App stderr [{}] read error: {}", app, e); break; }
-                            }
-                        }
-                        _ = timeout => {
-                            error!("App stderr [{}]: No output for 5s, possible block", app);
-                        }
+                    match lines.next_line().await {
+                        Ok(Some(line)) => {
+                            error!("App stderr [{}]: {}", app, line);
+                        },
+                        Ok(None) => break,
+                        Err(e) => { error!("App stderr [{}] read error: {}", app, e); break; }
                     }
                 }
             });

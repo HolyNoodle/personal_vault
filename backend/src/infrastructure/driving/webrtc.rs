@@ -1,3 +1,4 @@
+use crate::domain::aggregates::application_session::VideoConfig;
 use crate::infrastructure::driven::sandbox::XvfbManager;
 use crate::infrastructure::driven::sandbox::GStreamerManager;
 use anyhow::Result;
@@ -14,7 +15,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use webrtc::{
     api::{media_engine::MediaEngine, APIBuilder},
@@ -75,7 +76,7 @@ impl WebRTCAdapter {
         session_id: &str,
         ws_sender: Arc<tokio::sync::Mutex<SplitSink<WebSocket, Message>>>,
         gstreamer: Arc<GStreamerManager>,
-        config: &crate::domain::aggregates::VideoConfig,
+        config: &VideoConfig,
     ) -> Result<(Arc<RTCPeerConnection>, Arc<TrackLocalStaticSample>)> {
         let mut media_engine = MediaEngine::default();
 
@@ -188,7 +189,6 @@ impl WebRTCAdapter {
                                     sdp_mid: json_candidate.sdp_mid,
                                     sdp_mline_index: json_candidate
                                         .sdp_mline_index
-                                        .map(|v| v as u16),
                                 };
                                 if let Ok(json) = serde_json::to_string(&msg) {
                                     let mut sender_lock = sender.lock().await;
@@ -237,7 +237,7 @@ impl WebRTCAdapter {
         session_id: &str,
         ws_sender: Arc<tokio::sync::Mutex<SplitSink<WebSocket, Message>>>,
         gstreamer: Arc<GStreamerManager>,
-        config: &crate::domain::aggregates::VideoConfig,
+        config: &VideoConfig,
     ) -> Result<String> {
         info!("Creating WebRTC offer for session: {}", session_id);
 
@@ -355,7 +355,7 @@ async fn handle_socket(socket: WebSocket, adapter: Arc<WebRTCAdapter>, session_i
         crate::infrastructure::driven::sandbox::GStreamerManager::new()
             .expect("Failed to init GStreamer"),
     );
-    let config = crate::domain::aggregates::VideoConfig::default();
+    let config = VideoConfig::default();
 
     info!(
         "WebSocket connection established for session: {}",
@@ -366,7 +366,7 @@ async fn handle_socket(socket: WebSocket, adapter: Arc<WebRTCAdapter>, session_i
         match receiver.next().await {
             Some(Ok(msg)) => match msg {
                 Message::Text(text) => {
-                    info!("Received message: {}", text);
+                    debug!("Received message: {}", text);
                     match serde_json::from_str::<SignalingMessage>(&text) {
                         Ok(message) => {
                             let response = handle_signaling_message(
@@ -435,7 +435,7 @@ async fn handle_signaling_message(
     adapter: &Arc<WebRTCAdapter>,
     ws_sender: Arc<tokio::sync::Mutex<SplitSink<WebSocket, Message>>>,
     gstreamer: Arc<GStreamerManager>,
-    config: crate::domain::aggregates::VideoConfig,
+    config: VideoConfig,
 ) -> Result<Option<SignalingMessage>> {
     match message {
         SignalingMessage::RequestOffer => {
@@ -459,36 +459,36 @@ async fn handle_signaling_message(
             Ok(None)
         }
         SignalingMessage::MouseMove { x, y } => {
-            info!("Received MouseMove: x={}, y={}", x, y);
+            debug!("Received MouseMove: x={}, y={}", x, y);
             adapter.xvfb_manager.handle_mouse_move(session_id, x, y).await;
             Ok(None)
         }
         SignalingMessage::MouseDown { button } => {
-            info!("Received MouseDown: button={}", button);
+            debug!("Received MouseDown: button={}", button);
             adapter.xvfb_manager.handle_mouse_button(session_id, button, true).await;
             Ok(None)
         }
         SignalingMessage::MouseUp { button } => {
-            info!("Received MouseUp: button={}", button);
+            debug!("Received MouseUp: button={}", button);
             adapter.xvfb_manager.handle_mouse_button(session_id, button, false).await;
             Ok(None)
         }
         SignalingMessage::MouseScroll { delta_y } => {
-            info!("Received MouseScroll: delta_y={}", delta_y);
+            debug!("Received MouseScroll: delta_y={}", delta_y);
             Ok(None)
         }
         SignalingMessage::KeyDown { key, .. } => {
-            info!("Received KeyDown: key={}", key);
+            debug!("Received KeyDown: key={}", key);
             adapter.xvfb_manager.handle_keyboard(session_id, &key, true).await;
             Ok(None)
         }
         SignalingMessage::KeyUp { key, .. } => {
-            info!("Received KeyUp: key={}", key);
+            debug!("Received KeyUp: key={}", key);
             adapter.xvfb_manager.handle_keyboard(session_id, &key, false).await;
             Ok(None)
         }
         SignalingMessage::Resize { width, height } => {
-            info!("Received Resize: width={}, height={}", width, height);
+            debug!("Received Resize: width={}, height={}", width, height);
             Ok(None)
         }
         _ => Ok(None),
