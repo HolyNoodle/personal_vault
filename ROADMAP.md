@@ -9,14 +9,48 @@
 
 ---
 
+## Role Model
+
+Roles are a **set on each user**, not a single enum value. A user can hold multiple roles simultaneously:
+
+```
+user.roles: HashSet<UserRole>   // e.g. {SuperAdmin, Owner}
+```
+
+| Role | Capabilities |
+|------|-------------|
+| `Client` | Use apps within paths an Owner has granted them |
+| `Owner` | All Client capabilities + own a storage root, upload files, invite clients, manage permissions |
+| `SuperAdmin` | All Owner capabilities + manage other users, create Owner accounts |
+
+When the first SuperAdmin registers during initial setup, they receive **both** `SuperAdmin` and `Owner` roles and get a storage directory. A later SuperAdmin created by an existing SuperAdmin also gets both roles.
+
+**Role checks must test set membership, not equality:**
+```rust
+user.has_role(UserRole::Owner)        // true for [Owner] and [SuperAdmin, Owner]
+user.has_role(UserRole::SuperAdmin)   // true only for [SuperAdmin, Owner]
+```
+
+**What this changes from the current code:**
+- `User.role: UserRole` → `User.roles: Vec<UserRole>` (domain entity)
+- DB column `role user_role NOT NULL` → `roles user_role[] NOT NULL`
+- All route guards use `has_role()` not `== role`
+- `complete_webauthn_registration` assigns `[SuperAdmin, Owner]` not just `[SuperAdmin]`
+- JWT claims carry `roles: Vec<String>` not `role: String`
+
+**DB reset strategy:** Rather than writing ALTER TABLE migrations on top of the PoC schema, delete all existing migrations, rewrite a single clean initial migration with the correct schema, and reset the database (`DROP SCHEMA public CASCADE; CREATE SCHEMA public;` or equivalent). No data worth preserving exists.
+
+---
+
 ## Current State (Baseline)
 
-**What exists:**
-- [x] Domain: `User` entity with `UserRole` (SuperAdmin / Owner / Client), `UserStatus`
+**What exists and works:**
+- [x] Domain: `User` entity with `role: UserRole` (single — to be replaced)
+- [x] Domain: `UserRole` enum (SuperAdmin / Owner / Client), `UserStatus`
 - [x] Domain: `Credential` entity (WebAuthn passkey)
-- [x] DB: `users` + `webauthn_credentials` tables (2 migrations)
+- [x] DB: `users` + `webauthn_credentials` tables (PoC migrations — **will be wiped and rewritten**)
 - [x] Application: SuperAdmin WebAuthn registration flow (initiate + complete)
-- [x] Application: WebAuthn login flow — challenge/response works, but **credential verification is disabled in code**
+- [x] Application: WebAuthn login flow — challenge/response works, **credential verification disabled**
 - [x] Infrastructure: PostgreSQL user + credential repositories
 - [x] Infrastructure: Redis challenge repository (5 min TTL)
 - [x] Infrastructure: Xvfb per-session lifecycle (`start_xvfb`, `launch_app`, `start_capture`, `cleanup_session`)
@@ -27,10 +61,12 @@
 - [x] IPC: Unix socket protocol designed (`PlatformMessage` / `AppMessage`)
 - [x] WebRTC: Signaling, peer connection, VP8 video track (DTLS-SRTP)
 - [x] WebRTC: STUN/TURN configuration
+- [x] Route: `GET /api/setup/status` — checks `count_super_admins() == 0`
 
-**What is absent (nothing implemented yet):**
+**What is absent:**
+- Multi-role support in domain + DB
 - Per-user storage directories
-- Owner and Client user creation flows
+- Owner/Client creation flows
 - Invitation / sharing model (DB tables, domain, API)
 - Session table and session-role context
 - File management API
@@ -41,94 +77,125 @@
 
 ---
 
-## Phase 1 — Authentication Completion
+## Phase 0 — Initial Application Setup (First Run)
 
-Fix the existing auth plumbing before building on top of it.
+On first boot with an empty database, the application is in **uninitialized** state. The frontend detects this and shows a setup screen. The setup flow creates the first SuperAdmin, who is also an Owner.
 
-### 1.1 Login credential verification
+### 0.1 Setup status endpoint (already exists — verify correct)
+**File:** `backend/src/infrastructure/driving/http/check_setup_status.rs`
+
+- [x] `GET /api/setup/status` returns `{ initialized: bool }` based on `count_super_admins() > 0`
+- [ ] Verify: while `initialized = false`, ALL routes except `/api/setup/*` and `/health` return `503 Service Unavailable` (app is not usable until a SuperAdmin exists)
+
+### 0.2 First SuperAdmin registration
+**File:** `backend/src/application/super_admin/commands/complete_webauthn_registration.rs`
+
+- [x] `POST /api/setup/initiate-registration` — generates WebAuthn challenge
+- [x] `POST /api/setup/complete-registration` — saves user + passkey
+- [ ] **Fix**: assign `roles = [SuperAdmin, Owner]` instead of just `[SuperAdmin]`
+- [ ] **Fix**: after saving user, create owner storage directory `$STORAGE_PATH/{user_id}/` (Phase 2)
+- [ ] Guard: return `409 Conflict` if a SuperAdmin already exists (setup can only run once)
+
+### 0.3 Lock setup endpoints after initialization
+**File:** `backend/src/infrastructure/driving/http/auth.rs` or middleware
+
+- [ ] If `count_super_admins() > 0`, `/api/setup/initiate-registration` and `/api/setup/complete-registration` return `403 Forbidden`
+
+---
+
+## Phase 1 — Authentication Completion & Role Model Fix
+
+Fix existing auth plumbing and migrate the single-role model to multi-role.
+
+### 1.1 Multi-role domain + DB reset
+**File:** `backend/src/domain/entities/user.rs`
+**File:** `backend/src/domain/value_objects/user_role.rs`
+**Action:** delete all existing migrations; rewrite a single clean initial migration
+
+- [ ] Reset DB (`DROP SCHEMA public CASCADE; CREATE SCHEMA public;`) and delete all files under `backend/migrations/`
+- [ ] Write new `001_initial_schema.sql` with `roles user_role[] NOT NULL` from the start (no ALTER TABLE needed)
+- [ ] Change `User.role: UserRole` to `User.roles: Vec<UserRole>`
+- [ ] Add `User::has_role(&self, role: UserRole) -> bool`
+- [ ] Update `UserRepository` impl to read/write `roles` array
+- [ ] Update `complete_webauthn_registration` to write `roles = [SuperAdmin, Owner]`
+- [ ] Update JWT claims: `roles: Vec<String>` instead of `role: String`
+- [ ] Update `AuthenticatedUser` extension struct: `roles: Vec<UserRole>`
+
+### 1.2 Login credential verification
 **File:** `backend/src/application/super_admin/commands/complete_webauthn_login.rs`
 
-- [ ] Re-enable credential lookup by email (`credential_repo.find_by_user_id`)
+- [ ] Re-enable credential lookup by user id (`credential_repo.find_by_user_id`)
 - [ ] Call `webauthn.finish_passkey_authentication()` with the stored passkey
 - [ ] Update `sign_count` on the stored credential after successful auth
 - [ ] Return `403` on failed verification (not a silent pass)
+- [ ] JWT now carries `roles: Vec<String>`
 
-### 1.2 JWT middleware
+### 1.3 JWT middleware
 **New file:** `backend/src/infrastructure/driving/http/middleware/auth.rs`
 
 - [ ] Extract `Authorization: Bearer <token>` from requests
-- [ ] Validate JWT signature (HS256, `JWT_SECRET` env var — already read in main.rs)
+- [ ] Validate JWT signature (`JWT_SECRET` env var)
 - [ ] Reject expired tokens
-- [ ] Inject `AuthenticatedUser { id, email, role }` as Axum extension
-- [ ] Apply middleware to all routes except `/api/setup/*`, `/api/auth/*`, `/health`
+- [ ] Inject `AuthenticatedUser { id, email, roles: Vec<UserRole> }` as Axum extension
+- [ ] Apply to all routes except `/api/setup/*`, `/api/auth/*`, `/health`
 
-### 1.3 SuperAdmin: create Owner user
-**New:** `backend/src/application/super_admin/commands/create_owner.rs`
-**New route:** `POST /api/admin/users` (SuperAdmin only)
+### 1.4 SuperAdmin: invite a new Owner (or another SuperAdmin)
+**New:** `backend/src/application/super_admin/commands/invite_user.rs`
+**Route:** `POST /api/admin/invite` (SuperAdmin role required)
 
-- [ ] Validate caller has `UserRole::SuperAdmin`
-- [ ] Accept `{ email, display_name }` body
-- [ ] Create `User` with `UserRole::Owner`, `UserStatus::Active`
-- [ ] Persist user; return user ID
-- [ ] On creation: generate owner storage directory (see Phase 2)
+- [ ] Validate caller `has_role(SuperAdmin)`
+- [ ] Accept `{ email, display_name, roles: [Owner] | [SuperAdmin, Owner] }`
+- [ ] Create `User` with the given roles + `UserStatus::Active`
+- [ ] If roles includes `Owner`: create storage directory `$STORAGE_PATH/{user_id}/`
+- [ ] Generate signed invite token; return invite link
+- [ ] Invited user follows Owner registration flow (1.5)
 
-### 1.4 Owner WebAuthn registration (invitation-based)
-**New:** `backend/src/application/owner/commands/register_owner.rs`
+### 1.5 Owner / SuperAdmin WebAuthn registration via invite link
+**New routes:** `POST /api/invite/{token}/initiate`, `POST /api/invite/{token}/complete`
 
-- [ ] SuperAdmin sends invite link containing a signed token (`owner_invite:{user_id}`)
-- [ ] Owner opens link, initiates WebAuthn registration (`POST /api/owner/register/initiate`)
-- [ ] On completion (`POST /api/owner/register/complete`): verify token, save passkey, activate user
+- [ ] Validate token (signed, not expired, not already used)
+- [ ] On complete: save passkey for the pre-created user
+- [ ] Mark user as fully registered; return JWT
 
-### 1.5 Client user creation (invitation-based, Phase 3 prerequisite)
-Deferred — covered in Phase 3. Client users are created implicitly when they accept an invitation.
+### 1.6 Client user creation (deferred to Phase 3)
+Clients are created implicitly when they accept an invitation from an Owner.
 
 ---
 
 ## Phase 2 — Per-User Storage
 
-Every Owner gets an isolated directory. Client users never get their own storage root — they access a subset of an Owner's tree.
+Every user with the `Owner` role (including SuperAdmins) gets an isolated directory. Clients never get their own storage root.
 
-### 2.1 Storage root on user creation
-**File:** `backend/src/application/super_admin/commands/create_owner.rs` (Phase 1.3)
-**Env var:** `STORAGE_PATH` (already defined, e.g. `/data/storage`)
+### 2.1 Storage root creation on user creation
+**Triggered from:** Phase 0.2 (first SuperAdmin) and Phase 1.4 (invite with Owner role)
+**Env var:** `STORAGE_PATH` (e.g. `/data/storage`)
 
-- [ ] On Owner user creation: `mkdir -p $STORAGE_PATH/{owner_id}/`
-- [ ] Set directory ownership to backend process UID
-- [ ] Storage root is derived at runtime as `$STORAGE_PATH/{owner_id}` — no DB column needed
+- [ ] Helper: `create_owner_storage(user_id: &UserId) -> Result<PathBuf>`
+  - `mkdir -p $STORAGE_PATH/{user_id}/`
+  - Storage root is always derived as `$STORAGE_PATH/{user_id}` — no DB column needed
+- [ ] Called in every code path that creates a user with `Owner` role
 
-### 2.2 File management API
-**File:** `backend/src/infrastructure/driving/http/files.rs` (exists but empty)
-**Auth:** Owner JWT required on all endpoints
-
-- [ ] `GET  /api/files?path=<relative>` — list directory contents (name, size, modified, type)
-- [ ] `POST /api/files/upload` — multipart upload; store under `storage_root/{path}`
-- [ ] `GET  /api/files/download/{encoded_path}` — stream file to caller
-- [ ] `DELETE /api/files/{encoded_path}` — delete file or empty directory
-- [ ] `POST /api/files/mkdir` — create directory
-- [ ] `PUT  /api/files/rename` — rename/move within storage root
-- [ ] All paths are **relative to the owner's storage root** — backend prepends root and rejects `../` traversal
-
-### 2.3 File Explorer app: scoped root
+### 2.2 File Explorer app: scoped root
 **File:** `apps/file-explorer/src/app.rs`
-**New env var:** `ROOT_PATH` (set by backend when launching the app)
+**New env var:** `ROOT_PATH`
 
-- [ ] Read `ROOT_PATH` from environment; default to `/` only if not set
-- [ ] Clamp all navigation to within `ROOT_PATH` (disallow `..` traversal above root)
+- [ ] Read `ROOT_PATH` from environment; default `/` only if unset
+- [ ] Clamp all navigation to within `ROOT_PATH` (reject `..` above root)
 - [ ] Display relative path in UI breadcrumb (strip `ROOT_PATH` prefix)
 
-### 2.4 Backend passes `ROOT_PATH` to app
+### 2.3 Backend passes `ROOT_PATH` to app
 **File:** `backend/src/infrastructure/driven/sandbox/xvfb.rs` → `launch_app()`
 
 - [ ] Add `root_path: &str` parameter to `launch_app`
 - [ ] Set `ROOT_PATH={root_path}` in app env vars
-- [ ] For Owner session: `root_path = $STORAGE_PATH/{owner_id}`
-- [ ] For Client session: `root_path = $STORAGE_PATH/{owner_id}` (Landlock restricts further — Phase 5)
+- [ ] Owner/SuperAdmin session: `root_path = $STORAGE_PATH/{user_id}`
+- [ ] Client session: `root_path = $STORAGE_PATH/{owner_id}` (Landlock restricts further — Phase 5)
 
 ---
 
 ## Phase 3 — Invitation & Permission Model
 
-This is the core of the sharing system. An Owner invites a Client and specifies which paths (and what access level) the client gets.
+An Owner (or SuperAdmin acting as Owner) invites a Client and specifies which paths and access levels the client gets.
 
 ### 3.1 Database migrations
 **New migration:** `create_invitations_and_permissions`
@@ -138,9 +205,9 @@ This is the core of the sharing system. An Owner invites a Client and specifies 
   id UUID PRIMARY KEY,
   owner_id UUID REFERENCES users(id),
   invitee_email VARCHAR(255),
-  token VARCHAR(64) UNIQUE NOT NULL,   -- random secure token
-  granted_paths JSONB NOT NULL,         -- [{path, access: [read,write,delete]}]
-  status VARCHAR(20) NOT NULL,          -- pending, accepted, revoked, expired
+  token VARCHAR(64) UNIQUE NOT NULL,
+  granted_paths JSONB NOT NULL,   -- [{path, access: ["read","write","delete"]}]
+  status VARCHAR(20) NOT NULL,    -- pending | accepted | revoked | expired
   expires_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   ```
@@ -149,73 +216,72 @@ This is the core of the sharing system. An Owner invites a Client and specifies 
   id UUID PRIMARY KEY,
   owner_id UUID REFERENCES users(id),
   client_id UUID REFERENCES users(id),
-  path TEXT NOT NULL,                   -- relative to owner's storage root
-  access TEXT[] NOT NULL,              -- {read, write, delete}
+  path TEXT NOT NULL,             -- relative to owner's storage root
+  access TEXT[] NOT NULL,        -- {read, write, delete}
   granted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   expires_at TIMESTAMPTZ,
   revoked_at TIMESTAMPTZ
   ```
-- [ ] Index: `(client_id, revoked_at)` for fast active-permission lookups
-- [ ] Index: `(owner_id, client_id)` for per-pair queries
+- [ ] Index: `(client_id, revoked_at)` — fast active-permission lookups per client
+- [ ] Index: `(owner_id, client_id)` — per-pair queries
 
 ### 3.2 Domain entities
-- [ ] `Invitation` entity: `backend/src/domain/entities/invitation.rs`
-  - Fields: id, owner_id, invitee_email, token, granted_paths, status, expires_at
-  - Methods: `is_valid()`, `mark_accepted()`, `revoke()`
-- [ ] `FilePermission` entity: `backend/src/domain/entities/file_permission.rs`
-  - Fields: id, owner_id, client_id, path, access, granted_at, expires_at, revoked_at
-  - Methods: `is_active()`, `allows(AccessLevel)`, `revoke()`
+- [ ] `Invitation`: `backend/src/domain/entities/invitation.rs`
+  — fields: id, owner_id, invitee_email, token, granted_paths, status, expires_at
+  — methods: `is_valid()`, `mark_accepted()`, `revoke()`
+- [ ] `FilePermission`: `backend/src/domain/entities/file_permission.rs`
+  — fields: id, owner_id, client_id, path, access, granted_at, expires_at, revoked_at
+  — methods: `is_active()`, `allows(AccessLevel)`, `revoke()`
 - [ ] `GrantedPath` value object: `{ path: String, access: Vec<AccessLevel> }`
 - [ ] `AccessLevel` enum: `Read`, `Write`, `Delete`
 
-### 3.3 Repository ports
-- [ ] `InvitationRepository` trait: `save`, `find_by_token`, `find_by_owner`, `update_status`
-- [ ] `FilePermissionRepository` trait: `save`, `find_active_for_client`, `find_by_owner_client`, `revoke`
+### 3.3 Repository ports + implementations
+- [ ] `InvitationRepository`: `save`, `find_by_token`, `find_by_owner`, `update_status`
+- [ ] `FilePermissionRepository`: `save`, `find_active_for_client`, `find_by_owner_client`, `revoke`
 - [ ] PostgreSQL implementations for both
 
 ### 3.4 Owner: create invitation
 **New:** `backend/src/application/owner/commands/create_invitation.rs`
-**Route:** `POST /api/invitations` (Owner JWT)
+**Route:** `POST /api/invitations` — requires `has_role(Owner)`
 
-- [ ] Validate caller is Owner
 - [ ] Accept `{ invitee_email, granted_paths: [{path, access}], expires_in_hours }`
-- [ ] Validate all paths are within owner's storage root (no `../`)
-- [ ] Generate cryptographically random token (32 bytes → hex)
+- [ ] Validate all paths are within caller's storage root (reject `../`)
+- [ ] Generate 32-byte cryptographically random token
 - [ ] Persist invitation; return `{ invitation_id, token, invite_url }`
-- [ ] (Optional) Send email via SMTP with invite link (env: `SMTP_*` already configured)
+- [ ] Optional: send email via SMTP (`SMTP_*` env vars already configured)
 
 ### 3.5 Client: view & accept invitation
-**Route:** `GET  /api/invitations/{token}` — public, shows what's being shared
-**Route:** `POST /api/invitations/{token}/accept` — accepts, creates Client user + permissions
+**Route:** `GET  /api/invitations/{token}` — public (no auth needed)
+**Route:** `POST /api/invitations/{token}/accept`
 
-- [ ] `GET`: return `{ owner_display_name, granted_paths, expires_at }` (no sensitive data)
-- [ ] `POST` accept flow:
-  - [ ] Load invitation; check `is_valid()` (not expired, not revoked, not already accepted)
-  - [ ] If `invitee_email` is a known user: link to existing; else create new `User` with `UserRole::Client`
-  - [ ] Optionally trigger WebAuthn registration for new client user
+- [ ] `GET`: return `{ owner_display_name, granted_paths, expires_at }` — no sensitive data
+- [ ] `POST` accept:
+  - [ ] Load invitation; verify `is_valid()` (not expired, revoked, or already accepted)
+  - [ ] If invitee email matches an existing user: link permissions to that user
+  - [ ] Else: create new `User` with `roles = [Client]`
+  - [ ] Initiate WebAuthn registration for new client user (or return a one-time login token)
   - [ ] Create `FilePermission` rows for each `granted_path`
   - [ ] Mark invitation `status = accepted`
-  - [ ] Return JWT for the client user
+  - [ ] Return JWT for the client
 
 ### 3.6 Owner: list/revoke permissions
-**Route:** `GET    /api/permissions?client_id=<id>` (Owner JWT)
-**Route:** `DELETE /api/permissions/{id}` (Owner JWT)
+**Route:** `GET    /api/permissions?client_id=<id>` — requires `has_role(Owner)`
+**Route:** `DELETE /api/permissions/{id}` — requires `has_role(Owner)`
 
-- [ ] List returns all active permissions the owner has granted
-- [ ] Revoke sets `revoked_at = NOW()` on the permission row
-- [ ] Revoke triggers session restart if client has an active session (Phase 6)
+- [ ] List: all active permissions granted by the calling owner (optionally filtered by client)
+- [ ] Revoke: set `revoked_at = NOW()`
+- [ ] Revoke: trigger session restart if client has an active Xvfb session (Phase 6)
 
 ### 3.7 Client: list accessible paths
-**Route:** `GET /api/my-permissions` (Client JWT)
+**Route:** `GET /api/my-permissions` — requires `has_role(Client)`
 
-- [ ] Return all non-revoked, non-expired FilePermissions for the calling client
-- [ ] Used by the client's file explorer to know what they can navigate
+- [ ] Return all non-revoked, non-expired `FilePermission` rows for the calling client
 
 ---
 
 ## Phase 4 — Session Model with Role & Permission Context
 
-Currently the app launches without knowing who the user is or what they're allowed. This phase ties identity + permissions into the launch flow.
+The app launch currently knows nothing about who is launching or what they're allowed. This phase binds identity and permissions to each session.
 
 ### 4.1 Sessions database table
 **New migration:** `create_sessions_table`
@@ -224,211 +290,187 @@ Currently the app launches without knowing who the user is or what they're allow
   ```sql
   id UUID PRIMARY KEY,
   user_id UUID REFERENCES users(id),
-  owner_id UUID REFERENCES users(id),  -- NULL for Owner sessions (owner_id = user_id)
-  role user_role NOT NULL,
+  acting_as_owner_id UUID REFERENCES users(id), -- for Client sessions: whose storage root
+  active_role TEXT NOT NULL,  -- "owner" or "client" (which role is being exercised this session)
   app_id TEXT NOT NULL,
   display_number SMALLINT,
-  state TEXT NOT NULL,                 -- initializing, ready, active, terminated
+  state TEXT NOT NULL,         -- initializing | ready | active | terminated
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   expires_at TIMESTAMPTZ NOT NULL,
   terminated_at TIMESTAMPTZ
   ```
+  Note: `active_role` distinguishes which role is being exercised. A SuperAdmin always uses `owner` for app sessions.
 
-### 4.2 Session repository port + implementation
+### 4.2 Session repository
 - [ ] `SessionRepository` trait: `save`, `find_by_id`, `find_active_by_user`, `update_state`, `terminate`
 - [ ] PostgreSQL implementation
 
 ### 4.3 Launch application — auth-aware
 **File:** `backend/src/application/client/commands/launch_application.rs`
-**Route:** `POST /api/applications/launch` — now requires JWT
+**Route:** `POST /api/applications/launch` — requires JWT (any role)
 
-- [ ] Extract `AuthenticatedUser` from JWT middleware extension
-- [ ] If `role == Owner`: `root_path = $STORAGE_PATH/{user_id}`, full read/write/delete on root
-- [ ] If `role == Client`:
-  - [ ] Load active `FilePermission` rows for this client
-  - [ ] Resolve each path against owner's storage root
-  - [ ] `allowed_paths` = resolved permission paths only
-  - [ ] `root_path` = owner's storage root (Landlock restricts further)
+- [ ] Extract `AuthenticatedUser` from JWT middleware
+- [ ] If `has_role(Owner)` (includes SuperAdmin):
+  - `root_path = $STORAGE_PATH/{user_id}`, full read/write/delete on root
+  - `active_role = "owner"`, `acting_as_owner_id = user_id`
+- [ ] If `has_role(Client)` only:
+  - Load active `FilePermission` rows for this client
+  - Resolve paths against the owner's storage root
+  - `active_role = "client"`, `acting_as_owner_id = owner_id`
 - [ ] Create `Session` record in DB
-- [ ] Call `xvfb_manager.start_xvfb`, `launch_app` (passing `root_path`, `allowed_paths`), `start_capture`
+- [ ] Call `start_xvfb` → `launch_app(root_path, allowed_paths)` → `start_capture`
 - [ ] Return `{ session_id, websocket_url }`
 
 ### 4.4 Session expiry enforcement
-- [ ] Sessions have `expires_at` (default 1h via `SESSION_TIMEOUT` env var)
-- [ ] Background task: scan for expired sessions every 60s; call `cleanup_session` on expired ones
-- [ ] WebSocket disconnection sets session state to `terminated`
+- [ ] `expires_at = now + SESSION_TIMEOUT` (env var, default 3600s)
+- [ ] Background task every 60s: call `cleanup_session` on expired sessions
+- [ ] WebSocket disconnect sets session `state = terminated`
 
 ---
 
 ## Phase 5 — Sandbox Security Enforcement
 
-The actual kernel-level isolation. Each item is independent and can be shipped incrementally.
+Kernel-level isolation. Each item ships independently and incrementally.
 
-### 5.1 App filesystem scoping (application-level, defence-in-depth)
-**File:** `backend/src/infrastructure/driven/sandbox/xvfb.rs` → `launch_app()`
-**File:** `apps/file-explorer/src/app.rs`
-
-- [ ] Pass `ALLOWED_PATHS` env var (colon-separated list) for Client sessions
-- [ ] File Explorer reads `ALLOWED_PATHS` and hides navigation outside the allowed set
-- [ ] This is **UX enforcement only** — kernel-level enforcement is below
+### 5.1 App filesystem scoping (UX layer — defence-in-depth)
+- [ ] Pass `ALLOWED_PATHS` (colon-separated) env var to app process for Client sessions
+- [ ] File Explorer hides/disables navigation outside `ALLOWED_PATHS`
+- [ ] This is UX-only — kernel enforcement is below
 
 ### 5.2 Landlock LSM filesystem enforcement
 **New file:** `backend/src/infrastructure/driven/sandbox/landlock.rs`
 **Dependency:** `landlock` crate
 
 - [ ] Add `landlock` crate to `backend/Cargo.toml`
-- [ ] Implement `apply_landlock(allowed_paths: &[(String, AccessRights)])` function
-  - Uses `Ruleset::new()`, adds `PathBeneath` rules per path
-  - Calls `restrict_self()` — applies to current process and all descendants
-- [ ] In `launch_app()`: call `apply_landlock` inside `pre_exec` closure before exec
+- [ ] `apply_landlock(rules: &[(path: &str, rights: AccessRights)])` — calls `restrict_self()`
+- [ ] In `launch_app` `pre_exec` closure:
   - Owner: `[(root_path, ReadWrite | Remove)]`
-  - Client: `[(path, ReadOnly)]` per granted permission
-- [ ] Test: app process gets `EPERM` on paths outside the ruleset
+  - Client: one rule per granted path at appropriate access level
+- [ ] Verify: app gets `EPERM` on any path outside the ruleset
 
-### 5.3 Network isolation (network namespace)
-**File:** `backend/src/infrastructure/driven/sandbox/xvfb.rs` → `launch_app()`
+### 5.3 Network namespace (no internet for app)
+- [ ] In `pre_exec`: `libc::unshare(CLONE_NEWNET)` — new network namespace, no interfaces
+- [ ] Xvfb stays in host network namespace (needs loopback)
 
-- [ ] In `pre_exec`: call `libc::unshare(CLONE_NEWNET)` — new network namespace with no interfaces
-- [ ] App has no network access (cannot exfiltrate via HTTP, DNS, etc.)
-- [ ] Xvfb continues running in the host network namespace
+### 5.4 Mount namespace (strongest isolation)
+- [ ] In `pre_exec`: `unshare(CLONE_NEWNS)`
+- [ ] Bind-mount only: storage root (or allowed paths), `/tmp/.X11-unix/X{N}`, required system libs
+- [ ] Unlisted paths are `ENOENT`, not `EACCES`
 
-### 5.4 Mount namespace (filesystem view isolation)
-**File:** `backend/src/infrastructure/driven/sandbox/xvfb.rs`
-
-- [ ] In `pre_exec`: call `unshare(CLONE_NEWNS)` to create a new mount namespace
-- [ ] Bind-mount only required directories:
-  - Owner's storage root (or client's allowed paths)
-  - `/tmp/.X11-unix/X{N}` — Xvfb socket
-  - Minimal system libs required by the app binary
-- [ ] Paths outside the mount namespace don't exist (`ENOENT`, not `EACCES`)
-
-### 5.5 seccomp syscall filtering
+### 5.5 seccomp syscall allowlist
 **New file:** `backend/src/infrastructure/driven/sandbox/seccomp.rs`
 **Dependency:** `seccompiler` crate
 
-- [ ] Add `seccompiler` crate to `backend/Cargo.toml`
-- [ ] Build syscall allowlist for X11 desktop apps (read, write, open, mmap, socket AF_UNIX only, futex, clock_gettime, etc.)
-- [ ] Deny with SIGSYS: `mount`, `pivot_root`, `kexec_load`, `ptrace`, `process_vm_readv`, `setuid`, `setgid`
-- [ ] Apply filter in `pre_exec` after Landlock
+- [ ] Add `seccompiler` to `backend/Cargo.toml`
+- [ ] Allowlist: standard file I/O, mmap, futex, clock, epoll, AF_UNIX sockets, clone/fork/exec, X11-related syscalls
+- [ ] Denylist (SIGSYS): `mount`, `pivot_root`, `ptrace`, `kexec_load`, `init_module`, `setuid`, `setgid`, `process_vm_readv`
+- [ ] Apply in `pre_exec` after Landlock
 
 ### 5.6 cgroups v2 resource limits
 **New file:** `backend/src/infrastructure/driven/sandbox/cgroups.rs`
 
-- [ ] Create cgroup at `/sys/fs/cgroup/sandbox/{session_id}/` on session start
-- [ ] Write app PID into `cgroup.procs`
-- [ ] Set limits: `cpu.max = 500000 1000000` (50%), `memory.max = 512MB`, `pids.max = 100`
-- [ ] On session cleanup: remove cgroup directory
+- [ ] Create `/sys/fs/cgroup/sandbox/{session_id}/` on session start
+- [ ] Write app PID to `cgroup.procs`
+- [ ] `cpu.max = 500000 1000000` (50%), `memory.max = 512MB`, `pids.max = 100`
+- [ ] Delete cgroup on session cleanup
 
 ---
 
 ## Phase 6 — Real-Time Permission Enforcement
 
-When an owner revokes access mid-session, enforcement must happen immediately.
-
-### 6.1 Active session registry (client → session lookup)
+### 6.1 Active session lookup by user
 **File:** `backend/src/infrastructure/driven/sandbox/xvfb.rs`
 
-- [ ] Add lookup: `find_session_by_user_id(user_id) -> Option<session_id>`
+- [ ] `find_session_by_user_id(user_id) -> Option<&str>` (session_id)
 
 ### 6.2 Permission revocation triggers session restart
 **File:** `backend/src/application/owner/commands/revoke_permission.rs`
 
-- [ ] After setting `revoked_at` in DB: check if client has an active Xvfb session
-- [ ] If yes: `cleanup_session` + re-launch with updated (narrowed) permissions
-- [ ] Client experiences ~2s reconnect; Landlock enforces immediately with new process
+- [ ] After `revoked_at = NOW()`: check for active session
+- [ ] If active: `cleanup_session` → re-launch with narrowed permission set
+- [ ] Client reconnects (~2s); new process has new Landlock ruleset
 
-### 6.3 Owner dashboard WebSocket channel
-**Route:** `GET /ws/owner` (Owner JWT required before upgrade)
+### 6.3 Owner WebSocket channel (live dashboard)
+**Route:** `GET /ws/owner` — JWT required before upgrade, `has_role(Owner)`
 
-- [ ] Push events: `session_started`, `session_ended`, `file_opened`, `permission_revoked`
-- [ ] Source: IPC `AppMessage::State` events from the running app
+- [ ] Events: `session_started`, `session_ended`, `file_opened`, `permission_revoked`
+- [ ] Source: IPC `AppMessage::State` events from running app + session lifecycle
 
 ### 6.4 Client session WebSocket notifications
-**File:** `backend/src/infrastructure/driving/webrtc.rs` (extend existing WS)
+**File:** existing WS handler
 
-- [ ] Push `{ event: "permission_revoked", path }` when owner revokes
-- [ ] Push `{ event: "session_expiring", seconds_remaining: 300 }` on 5-min warning
-- [ ] Push `{ event: "session_terminated" }` when owner kills session
+- [ ] Push `{ event: "permission_revoked", path }` on revocation
+- [ ] Push `{ event: "session_expiring", seconds_remaining: 300 }` at 5-min warning
+- [ ] Push `{ event: "session_terminated" }` on owner kill or expiry
 
 ### 6.5 Audit log
 **New migration:** `create_audit_log_table`
 
-- [ ] `audit_events` table: `id`, `session_id`, `user_id`, `owner_id`, `event_type`, `payload JSONB`, `created_at`
-- [ ] Write on: session start/end, file open (from IPC), permission grant/revoke, invitation created/accepted
-- [ ] `GET /api/audit?client_id=` (Owner JWT) — read audit trail
+- [ ] `audit_events`: `id`, `session_id`, `user_id`, `owner_id`, `event_type`, `payload JSONB`, `created_at`
+- [ ] Write on: session start/end, file open (IPC), permission grant/revoke, invitation created/accepted
+- [ ] `GET /api/audit?client_id=` — requires `has_role(Owner)`
 
 ---
 
 ## Phase 7 — Transport & WebRTC Hardening
 
-Can be done in parallel with Phases 5–6.
+Independent — can run in parallel with any other phase.
 
 ### 7.1 WebSocket authentication
-**File:** `backend/src/infrastructure/driving/webrtc.rs`
-
 - [ ] Extract JWT from `?token=` query param before WS upgrade
-- [ ] Reject with `401` if token missing/invalid/expired
-- [ ] Bind WS session to `session_id` from JWT claims
+- [ ] `401` if missing/invalid; bind WS to `session_id` from claims
 
 ### 7.2 TLS / WSS
-**Infrastructure:** `haproxy/` (already present)
-
-- [ ] Enable TLS termination at HAProxy
-- [ ] WebSocket served over `wss://`
-- [ ] Set `WEBAUTHN_ORIGIN` to `https://` in production env
+- [ ] HAProxy TLS termination (config already in `haproxy/`)
+- [ ] WebSocket over `wss://`; set `WEBAUTHN_ORIGIN=https://` in production
 
 ### 7.3 TURN server hardening
-**File:** `backend/src/infrastructure/driving/webrtc.rs`
-
-- [ ] Ensure `TURN_USERNAME` / `TURN_CREDENTIAL` have no hardcoded defaults
-- [ ] Use `turns://` (TURN over TLS) in production
-- [ ] Consider per-session time-limited TURN credentials (HMAC-SHA1 scheme)
+- [ ] No hardcoded defaults for `TURN_USERNAME` / `TURN_CREDENTIAL`
+- [ ] `turns://` in production; consider per-session HMAC-SHA1 credentials
 
 ### 7.4 Input rate limiting
-**File:** `backend/src/infrastructure/driving/webrtc.rs`
-
-- [ ] Cap input events at ~120/s per session
-- [ ] Drop (not queue) events exceeding the limit
+- [ ] Cap at ~120 events/s per session; drop excess (don't queue)
 - [ ] Log excessive rate as audit event
 
 ---
 
-## Phase 8 — Management APIs
+## Phase 8 — Management API Surface
 
-API surface for the frontend to drive all the above features.
+Endpoints the frontend needs, built incrementally as each phase lands.
 
-### 8.1 SuperAdmin APIs
-- [ ] `GET  /api/admin/users` — list all users
-- [ ] `POST /api/admin/users` — create Owner user (Phase 1.3)
+### 8.1 SuperAdmin APIs (requires `has_role(SuperAdmin)`)
+- [ ] `GET  /api/admin/users` — list all users with their roles
+- [ ] `POST /api/admin/invite` — invite new Owner or SuperAdmin (Phase 1.4)
 - [ ] `PUT  /api/admin/users/{id}/status` — suspend / reactivate
 - [ ] `DELETE /api/admin/users/{id}` — soft-delete
+- [ ] `PUT  /api/admin/users/{id}/roles` — add or remove roles from a user
 
-### 8.2 Owner APIs
-- [ ] `GET  /api/storage/usage` — bytes used in owner's storage root
-- [ ] `GET  /api/clients` — list Client users linked to this owner
-- [ ] `GET  /api/clients/{client_id}/activity` — audit events for a specific client
-- [ ] `DELETE /api/sessions/{session_id}` — terminate an active client session
+### 8.2 Owner APIs (requires `has_role(Owner)`)
+- [ ] `GET  /api/storage/usage` — bytes used in caller's storage root
+- [ ] `GET  /api/clients` — Client users with active permissions from this owner
+- [ ] `GET  /api/clients/{client_id}/activity` — audit trail for a specific client
+- [ ] `DELETE /api/sessions/{session_id}` — terminate a client's active session
 - [ ] All invitation + permission endpoints (Phase 3)
-- [ ] All file management endpoints (Phase 2.2)
 
-### 8.3 Client APIs
-- [ ] `GET  /api/my-files` — list files the client can access
-- [ ] `GET  /api/my-session` — current session info + expiry
-- [ ] `POST /api/applications/launch` — launch sandboxed session (Phase 4.3)
+### 8.3 Client APIs (requires `has_role(Client)`)
+- [ ] `GET  /api/my-permissions` — active file permissions granted to caller
+- [ ] `GET  /api/my-session` — current session info + time remaining
+- [ ] `POST /api/applications/launch` — start sandboxed session
 
 ---
 
 ## Dependency Order
 
 ```
-Phase 1 (Auth fix)
-    → Phase 2 (Storage)         needs: Owner user creation
-        → Phase 3 (Invitations) needs: storage + Owner user
-            → Phase 4 (Session) needs: permissions
-                → Phase 5 (Sandbox security) needs: session context
-                    → Phase 6 (Real-time) needs: Landlock from Phase 5
+Phase 0 (Initial setup — first SuperAdmin)
+    → Phase 1 (Multi-role model + auth fix)
+        → Phase 2 (Storage — needs Owner role to exist properly)
+            → Phase 3 (Invitations — needs storage + Owner)
+                → Phase 4 (Session context — needs permissions)
+                    → Phase 5 (Kernel sandbox — needs session context)
+                        → Phase 6 (Real-time enforcement — needs Landlock)
 Phase 7 (Transport) — independent, any time
-Phase 8 (APIs)      — builds on each phase as it completes
+Phase 8 (APIs)      — incremental, follows each phase
 ```
 
 ---
@@ -437,9 +479,12 @@ Phase 8 (APIs)      — builds on each phase as it completes
 
 | File | Change |
 |------|--------|
+| `backend/migrations/` | **Delete all**; replace with single `001_initial_schema.sql` |
+| `backend/src/domain/entities/user.rs` | `role: UserRole` → `roles: Vec<UserRole>`, add `has_role()` |
+| `backend/src/application/super_admin/commands/complete_webauthn_registration.rs` | Assign `[SuperAdmin, Owner]`, create storage dir |
 | `backend/src/application/super_admin/commands/complete_webauthn_login.rs` | Re-enable credential verification |
-| `backend/src/infrastructure/driving/http/middleware/auth.rs` | **New** — JWT middleware |
-| `backend/src/application/super_admin/commands/create_owner.rs` | **New** — Owner creation + storage dir |
+| `backend/src/infrastructure/driving/http/middleware/auth.rs` | **New** — JWT middleware, `has_role()` guards |
+| `backend/src/application/super_admin/commands/invite_user.rs` | **New** — create user with given roles |
 | `backend/migrations/…_create_invitations_and_permissions.sql` | **New** |
 | `backend/migrations/…_create_sessions_table.sql` | **New** |
 | `backend/migrations/…_create_audit_log.sql` | **New** |
