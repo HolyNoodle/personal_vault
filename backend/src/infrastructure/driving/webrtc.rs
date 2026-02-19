@@ -141,9 +141,7 @@ impl WebRTCAdapter {
         let height = config.height;
         let framerate = config.framerate;
 
-        // Start Xvfb, launch app, start capture
-        self.xvfb_manager.start_xvfb(session_id, width, height).await?;
-        self.xvfb_manager.launch_app(session_id, "file-explorer", width, height).await?;
+        // Start capture (Xvfb and app are launched by the HTTP launch endpoint before WS connects)
         let vp8_rx = self.xvfb_manager.start_capture(session_id, framerate, &gstreamer).await?;
 
         // Set up cancel token for this session
@@ -338,15 +336,16 @@ pub async fn ws_handler(
     ws: WebSocketUpgrade,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
     State(adapter): State<Arc<WebRTCAdapter>>,
+    axum::Extension(app_state): axum::Extension<crate::infrastructure::AppState>,
 ) -> impl axum::response::IntoResponse {
     let session_id = params
         .get("session")
         .cloned()
         .unwrap_or_else(|| Uuid::new_v4().to_string());
-    ws.on_upgrade(move |socket| handle_socket(socket, adapter, session_id))
+    ws.on_upgrade(move |socket| handle_socket(socket, adapter, session_id, app_state))
 }
 
-async fn handle_socket(socket: WebSocket, adapter: Arc<WebRTCAdapter>, session_id: String) {
+async fn handle_socket(socket: WebSocket, adapter: Arc<WebRTCAdapter>, session_id: String, app_state: crate::infrastructure::AppState) {
     let (sender, mut receiver): (SplitSink<WebSocket, Message>, SplitStream<WebSocket>) =
         socket.split();
     let sender = Arc::new(tokio::sync::Mutex::new(sender));
@@ -427,6 +426,11 @@ async fn handle_socket(socket: WebSocket, adapter: Arc<WebRTCAdapter>, session_i
     );
     let cleanup_result = adapter.cleanup(&session_id).await;
     info!("[CLEANUP] WebSocket handler cleanup result for session {}: {:?}", session_id, cleanup_result);
+
+    // Mark session as terminated in DB (best-effort)
+    if let Ok(session_uuid) = uuid::Uuid::parse_str(&session_id) {
+        let _ = app_state.session_repo.terminate(&session_uuid).await;
+    }
 }
 
 async fn handle_signaling_message(

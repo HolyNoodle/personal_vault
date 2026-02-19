@@ -15,10 +15,10 @@ mod infrastructure;
 
 use infrastructure::driving::{WebRTCAdapter};
 use infrastructure::driven::{XvfbManager, IpcSocketServer};
-use infrastructure::driven::persistence::{SqliteCredentialRepository, RedisChallengeRepository, SqliteUserRepository, SqliteInvitationRepository, SqliteFilePermissionRepository};
+use infrastructure::driven::persistence::{SqliteCredentialRepository, RedisChallengeRepository, SqliteUserRepository, SqliteInvitationRepository, SqliteFilePermissionRepository, SqliteSessionRepository};
 use axum::routing::post;
 use infrastructure::driving::http::auth;
-use application::ports::{CredentialRepository, ChallengeRepository, InvitationRepository, FilePermissionRepository};
+use application::ports::{CredentialRepository, ChallengeRepository, InvitationRepository, FilePermissionRepository, SessionRepository};
 
 use diesel::r2d2::{self, ConnectionManager};
 use diesel::SqliteConnection;
@@ -101,8 +101,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         as Arc<dyn CredentialRepository>;
     let invitation_repo = Arc::new(SqliteInvitationRepository::new(pool.clone()))
         as Arc<dyn InvitationRepository>;
-    let file_permission_repo = Arc::new(SqliteFilePermissionRepository::new(pool))
+    let file_permission_repo = Arc::new(SqliteFilePermissionRepository::new(pool.clone()))
         as Arc<dyn FilePermissionRepository>;
+    let session_repo = Arc::new(SqliteSessionRepository::new(pool))
+        as Arc<dyn SessionRepository>;
 
     // Initialize Redis challenge repository
     let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
@@ -111,6 +113,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let challenge_repo = Arc::new(RedisChallengeRepository::new(redis_client)) as Arc<dyn ChallengeRepository>;
 
     let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev_secret_key_change_in_production".to_string());
+
+    // Initialize Xvfb manager
+    let apps_root = std::env::var("APPS_ROOT").unwrap_or_else(|_| "/app/.app".to_string());
+    let xvfb_manager = Arc::new(XvfbManager::new(apps_root));
+
+    // Initialize WebRTC adapter with XvfbManager
+    let webrtc_adapter = Arc::new(WebRTCAdapter::new(xvfb_manager.clone()));
 
     // Create auth app state
     let app_state = AppState {
@@ -121,15 +130,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         challenge_repo,
         invitation_repo,
         file_permission_repo,
+        session_repo,
+        xvfb_manager: xvfb_manager.clone(),
+        storage_path: storage_path.clone(),
     };
-
-    // Initialize infrastructure adapters
-    let apps_root = std::env::var("APPS_ROOT").unwrap_or_else(|_| "/app/.app".to_string());
-    let xvfb_manager = Arc::new(XvfbManager::new(apps_root));
-
-
-    // Initialize WebRTC adapter with XvfbManager
-    let webrtc_adapter = Arc::new(WebRTCAdapter::new(xvfb_manager.clone()));
 
     // Create API state
     // ApiState and video session handlers removed
@@ -151,15 +155,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let auth_routes = auth::setup_routes()
         .with_state(app_state.clone());
 
-    // WebSocket route with WebRTCAdapter state
+    // WebSocket route with WebRTCAdapter state + AppState extension for session tracking
     let ws_routes = Router::new()
         .route("/ws", get(infrastructure::driving::webrtc::ws_handler))
+        .layer(axum::Extension(app_state.clone()))
         .with_state(webrtc_adapter.clone());
 
-    // Application platform routes
+    // Application platform routes (require auth — enforced in launch_application handler)
     let app_routes = Router::new()
         .route("/api/applications", get(infrastructure::driving::http::application_routes::list_applications))
-        .route("/api/applications/launch", post(infrastructure::driving::http::application_routes::launch_application));
+        .route("/api/applications/launch", post(infrastructure::driving::http::application_routes::launch_application))
+        .with_state(app_state.clone());
 
     use infrastructure::driving::http::{owner, client, invite};
     // Owner routes (require Owner role — enforced in handlers)
@@ -218,6 +224,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .allow_headers(Any)
         )
         .layer(axum::middleware::from_fn(require_initialized));
+
+    // Background task: clean up expired sessions every 60 seconds
+    {
+        let state_for_expiry = app_state.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+            loop {
+                interval.tick().await;
+                match state_for_expiry.session_repo.find_expired().await {
+                    Ok(expired) => {
+                        for session in expired {
+                            let sid = session.id.to_string();
+                            let _ = state_for_expiry.xvfb_manager.cleanup_session(&sid).await;
+                            let _ = state_for_expiry.session_repo.terminate(&session.id).await;
+                            tracing::info!("Expired session cleaned up: {}", sid);
+                        }
+                    }
+                    Err(e) => tracing::warn!("Failed to query expired sessions: {}", e),
+                }
+            }
+        });
+    }
 
     // Start server
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));

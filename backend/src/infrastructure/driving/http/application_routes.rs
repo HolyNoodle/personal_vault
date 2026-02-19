@@ -1,7 +1,10 @@
-use axum::debug_handler;
-use axum::Json;
+use axum::{extract::State, Json};
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
-// use crate::infrastructure::driving::http::video_api::ApiState;
+use crate::infrastructure::AppState;
+use crate::infrastructure::driving::http::middleware::auth::AuthenticatedUser;
+use crate::application::client::commands::launch_application;
 
 #[derive(Serialize)]
 pub struct ApplicationMetadata {
@@ -25,8 +28,14 @@ pub async fn list_applications() -> Json<Vec<ApplicationMetadata>> {
 #[derive(Deserialize)]
 pub struct LaunchApplicationRequest {
     pub app_id: String,
-    pub user_id: String,
+    #[serde(default = "default_width")]
+    pub width: u16,
+    #[serde(default = "default_height")]
+    pub height: u16,
 }
+
+fn default_width() -> u16 { 1280 }
+fn default_height() -> u16 { 720 }
 
 #[derive(Serialize)]
 pub struct LaunchApplicationResponse {
@@ -34,23 +43,19 @@ pub struct LaunchApplicationResponse {
     pub websocket_url: String,
 }
 
-#[debug_handler]
 pub async fn launch_application(
+    State(state): State<AppState>,
+    user: AuthenticatedUser,
     Json(payload): Json<LaunchApplicationRequest>,
-) -> Json<LaunchApplicationResponse> {
-    tracing::info!(
-        "[API] launch_application: app_id={}, user_id={}",
-        payload.app_id,
-        payload.user_id
-    );
-
-    let session_id = uuid::Uuid::new_v4().to_string();
-
-    // The app is launched when WebRTC connects (on request-offer).
-    // This endpoint just returns the session info for the client to connect.
-
-    Json(LaunchApplicationResponse {
-        session_id: session_id.clone(),
-        websocket_url: format!("ws://localhost:8080/ws?session={}", session_id),
-    })
+) -> impl IntoResponse {
+    match launch_application::execute(&state, &user, &payload.app_id, payload.width, payload.height).await {
+        Ok(result) => (
+            StatusCode::OK,
+            Json(LaunchApplicationResponse {
+                session_id: result.session_id,
+                websocket_url: result.websocket_url,
+            }),
+        ).into_response(),
+        Err((status, msg)) => (status, msg).into_response(),
+    }
 }

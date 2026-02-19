@@ -179,6 +179,8 @@ impl XvfbManager {
         app_name: &str,
         width: u16,
         height: u16,
+        root_path: &str,
+        allowed_paths: &[String],
     ) -> Result<()> {
         let binary_name = app_name.replace('-', "_");
         let binary_path = format!("{}/{}/{}", self.apps_root, binary_name, binary_name);
@@ -196,21 +198,76 @@ impl XvfbManager {
         let ipc_socket_path = std::env::var("IPC_SOCKET_PATH")
             .unwrap_or_else(|_| "/tmp/sandbox-ipc.sock".to_string());
 
+        let root_path = root_path.to_string();
+        let allowed_paths_owned: Vec<String> = allowed_paths.to_vec();
+        let allowed_paths_str = allowed_paths_owned.join(":");
+
+        // Build seccomp filter in the parent before fork (non-fatal if empty)
+        let seccomp_prog = super::seccomp::build_seccomp_filter();
+
+        let root_path_for_closure = root_path.clone();
+        let allowed_paths_for_closure = allowed_paths_owned.clone();
+
+
         let mut child = unsafe {
-            Command::new(&binary_path)
-                .env("DISPLAY", &display_str)
+            let mut cmd = Command::new(&binary_path);
+            cmd.env("DISPLAY", &display_str)
                 .env("IPC_SOCKET_PATH", &ipc_socket_path)
                 .env("SANDBOX_WIDTH", width.to_string())
-                .env("SANDBOX_HEIGHT", height.to_string())
-                .stdout(Stdio::piped())
+                .env("SANDBOX_HEIGHT", height.to_string());
+            if !root_path.is_empty() {
+                cmd.env("ROOT_PATH", &root_path);
+            }
+            if !allowed_paths_str.is_empty() {
+                cmd.env("ALLOWED_PATHS", &allowed_paths_str);
+            }
+            cmd.stdout(Stdio::piped())
                 .stderr(Stdio::piped())
-                .pre_exec(|| {
+                .pre_exec(move || {
+                    // 1. New session
                     libc::setsid();
+
+                    // 2. Network namespace: no external network access
+                    if libc::unshare(libc::CLONE_NEWNET) != 0 {
+                        // non-fatal: log via errno but continue
+                        let _ = std::io::Error::last_os_error();
+                    }
+
+                    // 3. Mount namespace: isolated mount view
+                    libc::unshare(libc::CLONE_NEWNS);
+
+                    // 4. Landlock filesystem restrictions
+                    if let Err(e) = super::landlock::apply_landlock(
+                        &root_path_for_closure,
+                        &allowed_paths_for_closure,
+                    ) {
+                        // non-fatal: warn but continue (kernel may not support Landlock)
+                        let _ = e;
+                    }
+
+                    // 5. seccomp syscall denylist
+                    if !seccomp_prog.is_empty() {
+                        let _ = super::seccomp::apply_seccomp_filter(&seccomp_prog);
+                    }
+
                     Ok(())
-                })
-                .spawn()
-                .with_context(|| format!("Failed to spawn {}", binary_path))?
+                });
+
+            match cmd.spawn() {
+                Ok(child) => child,
+                Err(e) => {
+                    error!("Failed to spawn {}: {}", binary_path, e);
+                    return Err(anyhow::anyhow!("Failed to spawn {}: {}", binary_path, e));
+                }
+            }
         };
+
+        // 6. cgroups v2: resource limits (parent side — needs child PID)
+        if let Some(pid) = child.id() {
+            if let Err(e) = super::cgroups::setup_cgroup(session_id, pid) {
+                warn!("cgroup setup failed for session {} (non-fatal): {}", session_id, e);
+            }
+        }
         debug!("App process spawned for session {}: pid={:?}", session_id, child.id());
 
         if let Some(stdout) = child.stdout.take() {
@@ -357,6 +414,10 @@ impl XvfbManager {
 
     pub async fn cleanup_session(&self, session_id: &str) -> Result<()> {
         info!("cleanup_session called for session {}", session_id);
+
+        // Remove cgroup (non-fatal)
+        super::cgroups::teardown_cgroup(session_id);
+
         let mut displays = self.displays.write().await;
         if let Some(mut session) = displays.remove(session_id) {
             // Stop GStreamer pipeline

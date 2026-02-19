@@ -120,10 +120,9 @@ export function LoginPage() {
         throw new Error(errData || 'Failed to complete login');
       }
 
-      const { token, user } = await completeRes.json();
-
+      const { token } = await completeRes.json();
       // Store auth state and navigate
-      login(user, token);
+      await login(token);
       navigate('/');
     } catch (err) {
       console.error('Login error:', err);

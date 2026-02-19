@@ -21,7 +21,7 @@ interface LayoutProps {
 
 export function Layout({ children }: LayoutProps) {
   const { t } = useTranslation()
-  const { user, logout } = useAuthStore()
+  const { user, logout, hasRole } = useAuthStore()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -56,6 +56,37 @@ export function Layout({ children }: LayoutProps) {
             {getPageTitle()}
           </Typography>
           
+
+          {/* SuperAdmin section */}
+          {hasRole && hasRole('super_admin') && (
+            <Button color="inherit" onClick={() => navigate('/admin/users')} sx={{ mx: 1 }}>
+              Users
+            </Button>
+          )}
+
+          {/* Owner section */}
+          {hasRole && hasRole('owner') && (
+            <>
+              <Button color="inherit" onClick={() => navigate('/owner/invitations')} sx={{ mx: 1 }}>
+                Invitations
+              </Button>
+              <Button color="inherit" onClick={() => navigate('/owner/permissions')} sx={{ mx: 1 }}>
+                Permissions
+              </Button>
+              <Button color="inherit" onClick={() => navigate('/owner/clients')} sx={{ mx: 1 }}>
+                Clients
+              </Button>
+            </>
+          )}
+
+          {/* Client section */}
+          {hasRole && hasRole('client') && (
+            <Button color="inherit" onClick={() => navigate('/my-permissions')} sx={{ mx: 1 }}>
+              My Access
+            </Button>
+          )}
+
+          {/* Common navigation */}
           <Button
             color="inherit"
             startIcon={<AppsIcon />}
@@ -67,7 +98,6 @@ export function Layout({ children }: LayoutProps) {
           >
             Applications
           </Button>
-          
           <Button
             color="inherit"
             startIcon={<VideoCallIcon />}
@@ -82,7 +112,7 @@ export function Layout({ children }: LayoutProps) {
 
           <Box sx={{ ml: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
             <Typography variant="body2">
-              {user?.email} ({user?.role})
+              {user?.email} {user?.roles && `[${user.roles.join(', ')}]`}
             </Typography>
             <IconButton color="inherit" onClick={handleLogout} title={t('nav.logout')}>
               <LogoutIcon />

@@ -18,6 +18,7 @@ import {
 } from '@mui/material';
 import { Add, Delete, Launch } from '@mui/icons-material';
 import { useAuthStore } from '../store/authStore';
+import { authFetch } from '../services/authFetch';
 
 export function LaunchApplicationPage() {
   const [searchParams] = useSearchParams();
@@ -58,7 +59,7 @@ export function LaunchApplicationPage() {
     setError(null);
 
     try {
-      const response = await fetch('http://localhost:8080/api/applications/launch', {
+      const response = await authFetch('http://localhost:8080/api/applications/launch', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

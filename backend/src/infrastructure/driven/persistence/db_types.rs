@@ -41,6 +41,30 @@ pub struct DbFilePermission {
     pub revoked_at: Option<String>,
 }
 
+#[derive(diesel::QueryableByName, Debug)]
+pub struct DbSession {
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub id: String,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub user_id: String,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+    pub acting_as_owner_id: Option<String>,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub active_role: String,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub app_id: String,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Integer>)]
+    pub display_number: Option<i32>,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub state: String,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub created_at: String,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    pub expires_at: String,
+    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+    pub terminated_at: Option<String>,
+}
+
 #[derive(Queryable, Selectable)]
 #[diesel(table_name = users)]
 pub struct DbUser {

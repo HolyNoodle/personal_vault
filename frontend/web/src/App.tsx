@@ -14,14 +14,23 @@ import SetupPage from './pages/SetupPage'
 import { useAuthStore } from './store/authStore'
 import { theme } from './theme'
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated } = useAuthStore()
-  
+interface ProtectedRouteProps {
+  children: React.ReactNode;
+  requiredRole?: string;
+}
+
+function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) {
+  const { isAuthenticated, hasRole } = useAuthStore();
+
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />
+    return <Navigate to="/login" replace />;
   }
-  
-  return <Layout>{children}</Layout>
+
+  if (requiredRole && !hasRole(requiredRole)) {
+    return <Navigate to="/forbidden" replace />;
+  }
+
+  return <Layout>{children}</Layout>;
 }
 
 function App() {
