@@ -31,7 +31,6 @@ Implementation flow:
 - Create a PR and push
 
 How to run commands:
-
 If you are not inside the dev container, you'll need to prefix your commands with
 
 ```
