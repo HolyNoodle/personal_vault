@@ -25,7 +25,7 @@ What tasks you do:
 - Take a plan and implement it
 
 Implementation flow:
-- Use git to create a new branch from master (or the parent branch if we are chaining branches)
+- Use git to create a new branch from main (or the parent branch if we are chaining branches)
 - Read the plan
 - Implement the plan:
   - Make consistently tied changes
