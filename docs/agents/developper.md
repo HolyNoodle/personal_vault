@@ -34,7 +34,8 @@ Implementation flow:
   - git commit (cf: use git commit sementics)
 - Check the build (see how to run commands) => attend until errors and warnings are gone
 - Check the tests (see how to run commands) => attend until everything is fine
-- Create a PR and push
+- git push
+- Create a PR (if `gh` is avail, else don't do an tell the user to create the PR manually)
 
 How to run commands:
 If you are not inside the dev container, you'll need to prefix your commands with
